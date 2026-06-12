@@ -118,6 +118,45 @@ static bool refs_resolved(const std::string &css)
   return true;
 }
 
+// Schema sanity for the bundled Darkness themes: their explicit "background"
+// block must reference the matching wallpaper asset.
+static void background_schema_test()
+{
+  doki::msg_log("background schema:\n");
+
+  ThemeRegistry reg;
+  reg.load_dir(definitions_dir());
+  if ( reg.empty() )
+  {
+    ++g_failures;
+    doki::msg_log("  FAIL: no themes available to check\n");
+    return;
+  }
+
+  bool found_dark = false, found_light = false;
+  for ( const auto &t : reg.themes() )
+  {
+    if ( t.name == "Darkness Dark" )
+    {
+      found_dark = true;
+      CHECK(t.background.valid()
+         && t.background.name == "darkness_dark.png",
+            "Darkness Dark background.name == 'darkness_dark.png' (got '%s')\n",
+            t.background.name.c_str());
+    }
+    if ( t.name == "Darkness Light" )
+    {
+      found_light = true;
+      CHECK(t.background.valid()
+         && t.background.name == "darkness_light.png",
+            "Darkness Light background.name == 'darkness_light.png' (got '%s')\n",
+            t.background.name.c_str());
+    }
+  }
+  CHECK(found_dark,  "Darkness Dark definition present\n");
+  CHECK(found_light, "Darkness Light definition present\n");
+}
+
 static void css_generation_test()
 {
   doki::msg_log("css generation:\n");
@@ -139,6 +178,13 @@ static void css_generation_test()
     opt.include_sticker = true;
     opt.sticker_file = t.sticker.name;
     opt.sticker_anchor = t.sticker.anchor;
+    // Mirror the runtime: enable wallpaper for any theme that declares one
+    // (the explicit-background path the plan introduces).
+    if ( t.background.valid() )
+    {
+      opt.include_wallpaper = true;
+      opt.wallpaper_file = "doki_wallpaper.png";
+    }
     std::string css = generate_theme_css(t, pal, opt);
 
     int braces = 0;
@@ -153,6 +199,30 @@ static void css_generation_test()
 
     CHECK(ok, "valid CSS for %s (%u bytes, braces balanced=%s)\n",
           t.displayName.c_str(), (uint)css.size(), braces == 0 ? "yes" : "NO");
+
+    // Wallpaper assertions: themes that declared a background must emit the
+    // IDAViewHost block referencing doki_wallpaper.png, plus the pseudocode
+    // text_area_t block (so the decompiler view shares the wallpaper).
+    if ( t.background.valid() )
+    {
+      bool wall_ok = css.find("IDAViewHost") != std::string::npos
+                  && css.find("text_area_t") != std::string::npos
+                  && css.find("text_area_t QWidget") != std::string::npos
+                  && css.find("text_area_margin_widget_t") != std::string::npos
+                  && css.find("doki_wallpaper.png") != std::string::npos;
+      CHECK(wall_ok, "wallpaper CSS (IDAViewHost + pseudocode viewport) emitted for %s\n",
+            t.displayName.c_str());
+    }
+
+    // Pseudocode/decompiler selectors must be present in every generated
+    // theme, regardless of wallpaper, so syntax highlighting follows the
+    // doki palette in the decompiler view.
+    bool pseudo_ok = css.find("text_area_t") != std::string::npos
+                  && css.find("syntax_color_t") != std::string::npos
+                  && css.find("qproperty-keyword1-fg") != std::string::npos
+                  && css.find("qproperty-function-name-color") != std::string::npos;
+    CHECK(pseudo_ok, "pseudocode/decompiler color CSS emitted for %s\n",
+          t.displayName.c_str());
 
     if ( !dumped )
     {
@@ -169,6 +239,7 @@ bool run_selftest()
   doki::msg_log("=== self-test begin ===\n");
   color_conversion_tests();
   palette_completeness_test();
+  background_schema_test();
   css_generation_test();
   doki::msg_log("=== self-test %s (%d failure(s)) ===\n",
                 g_failures == 0 ? "PASSED" : "FAILED", g_failures);

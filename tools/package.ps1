@@ -5,6 +5,7 @@
 #     plugins/doki_theme.dll
 #     doki-theme/definitions/*.json
 #     doki-theme/assets/stickers/*.png
+#     doki-theme/assets/wallpapers/*.png
 #     ida-plugin.json
 #     INSTALL.md
 param([string]$Version = "0.1.0")
@@ -18,7 +19,8 @@ if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force `
   (Join-Path $stage "plugins"),
   (Join-Path $stage "doki-theme\definitions"),
-  (Join-Path $stage "doki-theme\assets\stickers") | Out-Null
+  (Join-Path $stage "doki-theme\assets\stickers"),
+  (Join-Path $stage "doki-theme\assets\wallpapers") | Out-Null
 
 $dll = Join-Path $env:IDASDK "src\bin\plugins\doki_theme.dll"
 if (-not (Test-Path $dll)) { $dll = Join-Path $repoRoot "build\Release\doki_theme.dll" }
@@ -27,6 +29,9 @@ if (-not (Test-Path $dll)) { throw "doki_theme.dll not found - build first." }
 Copy-Item $dll                                       (Join-Path $stage "plugins")
 Copy-Item (Join-Path $repoRoot "definitions\*.json") (Join-Path $stage "doki-theme\definitions")
 Copy-Item (Join-Path $repoRoot "assets\stickers\*.png") (Join-Path $stage "doki-theme\assets\stickers")
+if (Test-Path (Join-Path $repoRoot "assets\wallpapers")) {
+  Copy-Item (Join-Path $repoRoot "assets\wallpapers\*.png") (Join-Path $stage "doki-theme\assets\wallpapers")
+}
 Copy-Item (Join-Path $repoRoot "ida-plugin.json")    $stage
 Copy-Item (Join-Path $repoRoot "INSTALL.md")         $stage
 

@@ -22,6 +22,18 @@ struct DokiSticker
   bool valid() const { return !name.empty(); }
 };
 
+// A full-listing background / wallpaper. Same shape as DokiSticker so the
+// JSON schema is uniform. opacity is metadata only: QSS can't apply per-image
+// opacity, so the renderer (CSS) is free to ignore it. anchor is honored
+// when emitted.
+struct DokiBackground
+{
+  std::string name;        // file name, e.g. "darkness_dark.png"
+  std::string anchor;      // "center", "right", "left", ...
+  int opacity = 100;       // 0..100
+  bool valid() const { return !name.empty(); }
+};
+
 // One fully-parsed doki theme definition.
 struct DokiThemeDefinition
 {
@@ -34,6 +46,8 @@ struct DokiThemeDefinition
 
   DokiSticker sticker;     // primary sticker (stickers.default)
   DokiSticker secondary;   // optional (stickers.secondary)
+
+  DokiBackground background; // optional full-listing wallpaper (top-level "background")
 
   // Effective palette: base "colors" with "overrides.editorScheme.colors"
   // merged on top (the editor override wins, since IDA's listing *is* the

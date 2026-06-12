@@ -27,8 +27,11 @@ struct CssOptions
 
   // Optional full-listing wallpaper, painted on IDAViewHost behind everything.
   // When set, the sticker is layered on top (transparent memo background).
+  // The same wallpaper is also painted on the Hex-Rays pseudocode text_area_t
+  // so both disassembly and decompiler views share the background.
   bool include_wallpaper = false;
   std::string wallpaper_file;  // file name resolved via $RELPATH (theme folder)
+  std::string wallpaper_anchor; // "center" | "right" | "left" | "top" | "bottom"
 };
 
 // Generate a complete, self-contained theme.css body.

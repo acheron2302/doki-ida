@@ -112,16 +112,32 @@ InstallResult install_theme(const DokiThemeDefinition &def, bool activate,
     }
   }
 
-  // Optional wallpaper: a matching file in assets/wallpapers/<sticker name>.
-  if ( with_wallpaper && def.sticker.valid() )
+  // Optional wallpaper: prefer the explicit "background" block from the
+  // definition; fall back to assets/wallpapers/<sticker name> for legacy
+  // definitions that don't declare one.
+  if ( with_wallpaper )
   {
-    const std::string src = path_join(path_join(assets_dir(), "wallpapers"), def.sticker.name);
-    const std::string dst = path_join(dir, WALLPAPER_FILE);
-    if ( copy_binary_file(src, dst) )
+    std::string wall_name;
+    if ( def.background.valid() )
+      wall_name = def.background.name;
+    else if ( def.sticker.valid() )
+      wall_name = def.sticker.name;
+
+    if ( !wall_name.empty() )
     {
-      opt.include_wallpaper = true;
-      opt.wallpaper_file = WALLPAPER_FILE;
-      r.wallpaper_installed = true;
+      const std::string src = path_join(path_join(assets_dir(), "wallpapers"), wall_name);
+      const std::string dst = path_join(dir, WALLPAPER_FILE);
+      if ( copy_binary_file(src, dst) )
+      {
+        opt.include_wallpaper = true;
+        opt.wallpaper_file = WALLPAPER_FILE;
+        opt.wallpaper_anchor = def.background.anchor;
+        r.wallpaper_installed = true;
+      }
+      else
+      {
+        doki::msg_log("  wallpaper not found, skipping: %s\n", src.c_str());
+      }
     }
   }
 

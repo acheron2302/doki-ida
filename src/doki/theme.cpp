@@ -76,6 +76,19 @@ static void parse_sticker(const json &node, DokiSticker *out)
     out->opacity = node["opacity"].get<int>();
 }
 
+// Mirror of parse_sticker for the optional top-level "background" object.
+static void parse_background(const json &node, DokiBackground *out)
+{
+  if ( !node.is_object() )
+    return;
+  if ( node.contains("name") && node["name"].is_string() )
+    out->name = node["name"].get<std::string>();
+  if ( node.contains("anchor") && node["anchor"].is_string() )
+    out->anchor = node["anchor"].get<std::string>();
+  if ( node.contains("opacity") && node["opacity"].is_number() )
+    out->opacity = node["opacity"].get<int>();
+}
+
 //----------------------------------------------------------------------------
 bool load_definition(const char *path,
                      DokiThemeDefinition *out,
@@ -126,6 +139,9 @@ bool load_definition(const char *path,
       if ( st.contains("secondary") )
         parse_sticker(st["secondary"], &def.secondary);
     }
+
+    if ( j.contains("background") )
+      parse_background(j["background"], &def.background);
 
     // Base palette, then editor-scheme overrides on top.
     if ( j.contains("colors") )

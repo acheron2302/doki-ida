@@ -1,13 +1,16 @@
 # Build (optional) + deploy the plugin and its assets for local testing.
 #
-#   tools\deploy.ps1            # deploy DLL + assets + definitions
-#   tools\deploy.ps1 -Build     # cmake --build first
+#   tools\deploy.ps1                          # deploy DLL + assets + definitions
+#   tools\deploy.ps1 -Build                   # cmake --build first
+#   tools\deploy.ps1 -DeployToIdaSdkPlugins   # also copy DLL to $env:IDASDK\plugins
 #
 # Stages:
 #   <IDADIR>\plugins\doki_theme.dll
 #   $IDAUSR\doki-theme\definitions\*.json
 #   $IDAUSR\doki-theme\assets\stickers\*.png
-param([switch]$Build)
+#   $IDAUSR\doki-theme\assets\wallpapers\*.png
+#   [$env:IDASDK\plugins\doki_theme.dll] (only with -DeployToIdaSdkPlugins)
+param([switch]$Build, [switch]$DeployToIdaSdkPlugins)
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -27,6 +30,14 @@ $dll = Join-Path $env:IDASDK "src\bin\plugins\doki_theme.dll"
 if (-not (Test-Path $dll)) { $dll = Join-Path $repoRoot "build\Release\doki_theme.dll" }
 Copy-Item $dll (Join-Path $idadir "plugins\doki_theme.dll") -Force
 Write-Output "deployed DLL -> $idadir\plugins"
+
+if ($DeployToIdaSdkPlugins) {
+  if (-not $env:IDASDK) { throw "IDASDK env var is required for -DeployToIdaSdkPlugins" }
+  $sdkPlugins = Join-Path $env:IDASDK "plugins"
+  New-Item -ItemType Directory -Force $sdkPlugins | Out-Null
+  Copy-Item $dll (Join-Path $sdkPlugins "doki_theme.dll") -Force
+  Write-Output "deployed DLL -> $sdkPlugins"
+}
 
 $root = Join-Path $idausr "doki-theme"
 $defs = Join-Path $root "definitions"

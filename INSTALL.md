@@ -15,7 +15,11 @@
      plugins\doki_theme.dll           (if you chose the user dir)
      doki-theme\definitions\*.json
      doki-theme\assets\stickers\*.png
+     doki-theme\assets\wallpapers\*.png
    ```
+   The `assets\wallpapers` folder is required for themes that declare a
+   full-listing background (e.g. Darkness dark/light). Without it the
+   character is still colored, but no background image is installed.
 3. Start IDA and open a database.
 
 ## Use

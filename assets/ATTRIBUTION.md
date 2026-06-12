@@ -23,3 +23,11 @@ Bundled stickers in this repo:
 | zero_two_sakura.png     | stickers/vscode/franxx/zeroTwo/sakura/zero_two_sakura.png |
 | darkness_dark.png       | stickers/vscode/konoSuba/darkness/dark/darkness_dark.png |
 | darkness_light.png      | stickers/vscode/konoSuba/darkness/light/darkness_light.png |
+
+Bundled wallpapers in this repo (`assets/wallpapers/`) — used as the
+full-listing background for the matching Darkness theme:
+
+| File                    | Source path (doki-theme-assets)                         |
+|-------------------------|---------------------------------------------------------|
+| darkness_dark.png       | wallpapers/vscode/konoSuba/darkness/dark/darkness_dark.png |
+| darkness_light.png      | wallpapers/vscode/konoSuba/darkness/light/darkness_light.png |

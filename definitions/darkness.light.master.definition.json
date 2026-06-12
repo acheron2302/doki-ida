@@ -12,6 +12,11 @@
       "opacity": 10
     }
   },
+  "background": {
+    "name": "darkness_light.png",
+    "anchor": "center",
+    "opacity": 100
+  },
   "overrides": {
     "editorScheme": {
       "colors": {

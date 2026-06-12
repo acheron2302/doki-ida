@@ -113,12 +113,41 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
     if ( wall )
     {
       // The wallpaper lives on the view host, behind the (transparent) memo.
+      // Also paint it on the Hex-Rays pseudocode text area so the decompiler
+      // view shares the same background. In practice the imported base theme
+      // can still give the pseudocode viewport/child QWidget an opaque dark
+      // background, hiding the parent text_area_t background. Therefore the
+      // likely viewport child gets the same fixed wallpaper, while the margin
+      // remains explicitly transparent so it does not duplicate/cover it.
+      const std::string wall_pos = anchor_to_position(opt.wallpaper_anchor);
       o << "IDAViewHost\n{\n";
       o << "    background            : ${doki_bg} url(\"$RELPATH/"
         << opt.wallpaper_file << "\");\n";
       o << "    background-repeat     : no-repeat;\n";
-      o << "    background-position   : center center;\n";
+      o << "    background-position   : " << wall_pos << ";\n";
       o << "    background-attachment : fixed;\n";
+      o << "}\n\n";
+
+      o << "text_area_t\n{\n";
+      o << "    background            : ${doki_bg} url(\"$RELPATH/"
+        << opt.wallpaper_file << "\");\n";
+      o << "    background-repeat     : no-repeat;\n";
+      o << "    background-position   : " << wall_pos << ";\n";
+      o << "    background-attachment : fixed;\n";
+      o << "}\n\n";
+
+      o << "text_area_t QWidget\n{\n";
+      o << "    background            : transparent url(\"$RELPATH/"
+        << opt.wallpaper_file << "\");\n";
+      o << "    background-repeat     : no-repeat;\n";
+      o << "    background-position   : " << wall_pos << ";\n";
+      o << "    background-attachment : fixed;\n";
+      o << "    background-color      : transparent;\n";
+      o << "}\n\n";
+
+      o << "text_area_t text_area_margin_widget_t\n{\n";
+      o << "    background            : transparent;\n";
+      o << "    background-color      : transparent;\n";
       o << "}\n\n";
     }
     else
@@ -130,6 +159,49 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   // Navigation band base color (per-range colors come from the colorizer).
   o << "navband_t\n{\n";
   o << "    background-color : ${doki_bg};\n";
+  o << "}\n\n";
+
+  // Hex-Rays pseudocode / text-area colors. These selectors are inspired by
+  // IDA's built-in dark theme and the public Monokai-Light-IDA theme; the
+  // qproperty-* keys map to the fields exposed by text_area_t.
+  o << "text_area_t\n{\n";
+  o << "    qproperty-keyword1-fg     : ${doki_keyword};\n";
+  o << "    qproperty-keyword2-fg     : ${doki_accent};\n";
+  o << "    qproperty-keyword3-fg     : ${doki_number};\n";
+  o << "    qproperty-string-fg       : ${doki_string};\n";
+  o << "    qproperty-comment-fg      : ${doki_comment};\n";
+  o << "    qproperty-preprocessor-fg : ${doki_keyword};\n";
+  o << "    qproperty-number-fg       : ${doki_number};\n";
+  o << "    qproperty-user1-fg        : ${doki_name};\n";
+  o << "    qproperty-match-line-bg   : ${doki_caret_row};\n";
+  o << "    qproperty-match-text-bg   : ${doki_sel_bg};\n";
+  o << "}\n\n";
+
+  o << "text_area_t text_area_margin_widget_t\n{\n";
+  o << "    color                  : ${doki_comment};\n";
+  o << "    qproperty-header-color : ${doki_fg};\n";
+  o << "}\n\n";
+
+  // Decompiler semantic colors exposed via syntax_color_t. These cover the
+  // distinct categories Hex-Rays emits (function names, library funcs,
+  // imports, data references, etc.).
+  o << "syntax_color_t\n{\n";
+  o << "    qproperty-function-name-color        : ${doki_name};\n";
+  o << "    qproperty-library-function-color     : ${doki_name};\n";
+  o << "    qproperty-imported-function-color    : ${doki_accent};\n";
+  o << "    qproperty-data-name-color            : ${doki_name};\n";
+  o << "    qproperty-regular-data-name-color    : ${doki_name};\n";
+  o << "    qproperty-string-literal-color       : ${doki_string};\n";
+  o << "    qproperty-data-string-color          : ${doki_string};\n";
+  o << "    qproperty-numeric-constant-color     : ${doki_number};\n";
+  o << "    qproperty-data-numeric-color         : ${doki_number};\n";
+  o << "    qproperty-keyword-color              : ${doki_keyword};\n";
+  o << "    qproperty-symbol-color               : ${doki_fg};\n";
+  o << "    qproperty-register-color             : ${doki_register};\n";
+  o << "    qproperty-local-name-color           : ${doki_name};\n";
+  o << "    qproperty-code-reference-color       : ${doki_accent};\n";
+  o << "    qproperty-data-reference-color       : ${doki_number};\n";
+  o << "    qproperty-prefix-color               : ${doki_comment};\n";
   o << "}\n";
 
   return o.str();
