@@ -1,0 +1,24 @@
+# Build output
+/build/
+/out/
+/dist/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+*.cmake.stamp
+
+# IDE
+.vs/
+.vscode/
+*.user
+
+# OS
+Thumbs.db
+.DS_Store
+
+AGENT_PROMPT.md
+
+PLAN.md
+
+VERIFICATION.md

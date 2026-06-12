@@ -1,0 +1,11 @@
+{
+  "IDAMetadataDescriptorVersion": 1,
+  "plugin": {
+    "name": "Doki Theme",
+    "entryPoint": "doki_theme",
+    "categories": ["ui"],
+    "idaVersions": ">=9.0",
+    "description": "Anime character themes (color palettes + stickers/wallpapers) for IDA, ported from doki-theme.",
+    "version": "0.1.0"
+  }
+}
