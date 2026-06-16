@@ -37,10 +37,52 @@ set(DOKI_SOURCES
     src/doki/overlay.cpp
 )
 
-# Pre-built IDA-compatible Qt6 (namespaced as QT::) shipped locally.
-if(NOT DEFINED Qt6_DIR AND EXISTS "E:/dev/qt-yusa/x64win/lib/cmake/Qt6")
-    set(Qt6_DIR "E:/dev/qt-yusa/x64win/lib/cmake/Qt6")
-    message(STATUS "Using pre-built Qt6 at E:/dev/qt-yusa/x64win")
+# Locate Qt6 for the plugin target.
+# Priority for Qt6_DIR (pointing at lib/cmake/Qt6):
+#   1. Cached Qt6_DIR (set via -DQt6_DIR=... on the command line).
+#   2. DOKI_QT_DIR environment variable -> $DOKI_QT_DIR/lib/cmake/Qt6
+#      (use this to point at a local Qt, e.g. E:/dev/qt-yusa/x64win).
+#   3. CMAKE_PREFIX_PATH inherited from -DCMAKE_PREFIX_PATH=... (CI uses this).
+# We intentionally do not hardcode any developer-specific Qt path here.
+if(NOT DEFINED Qt6_DIR AND DEFINED ENV{DOKI_QT_DIR})
+    set(Qt6_DIR "$ENV{DOKI_QT_DIR}/lib/cmake/Qt6" CACHE PATH "Qt6 CMake directory")
+    message(STATUS "Using DOKI_QT_DIR for Qt6: $ENV{DOKI_QT_DIR}")
+endif()
+
+# Explicit early find_package so we can override imported target properties
+# (IDA Qt import libs) before ida_add_plugin appends Qt6::* to the link list.
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
+
+# Override Qt6::{Core,Gui,Widgets} import libs with the IDA SDK's QT_NAMESPACE=QT
+# Qt import libraries (idasdk/src/lib/x64_win_qt). Linking against a public Qt
+# import lib would pull in non-namespaced Qt symbols and break IDA at runtime.
+set(IDA_QT_LIB_DIR "" CACHE PATH "IDA SDK QT_NAMESPACE=QT Qt import library directory")
+if(WIN32)
+    if(NOT IDA_QT_LIB_DIR AND DEFINED ENV{IDA_QT_LIB_DIR})
+        set(IDA_QT_LIB_DIR "$ENV{IDA_QT_LIB_DIR}")
+    endif()
+    if(NOT IDA_QT_LIB_DIR AND DEFINED ENV{IDASDK})
+        if(EXISTS "$ENV{IDASDK}/src/lib/x64_win_qt")
+            set(IDA_QT_LIB_DIR "$ENV{IDASDK}/src/lib/x64_win_qt")
+        elseif(EXISTS "$ENV{IDASDK}/lib/x64_win_qt")
+            set(IDA_QT_LIB_DIR "$ENV{IDASDK}/lib/x64_win_qt")
+        endif()
+    endif()
+
+    if(IDA_QT_LIB_DIR)
+        message(STATUS "Overriding Qt6 import libs with IDA SDK Qt libs from: ${IDA_QT_LIB_DIR}")
+        foreach(module Core Gui Widgets)
+            set(lib_path "${IDA_QT_LIB_DIR}/Qt6${module}.lib")
+            if(NOT EXISTS "${lib_path}")
+                message(FATAL_ERROR "Missing IDA Qt import lib: ${lib_path}")
+            endif()
+            set_property(TARGET Qt6::${module} PROPERTY IMPORTED_IMPLIB "${lib_path}")
+            set_property(TARGET Qt6::${module} PROPERTY IMPORTED_IMPLIB_RELEASE "${lib_path}")
+            set_property(TARGET Qt6::${module} PROPERTY IMPORTED_IMPLIB_RELWITHDEBINFO "${lib_path}")
+            set_property(TARGET Qt6::${module} PROPERTY IMPORTED_IMPLIB_MINSIZEREL "${lib_path}")
+            set_property(TARGET Qt6::${module} PROPERTY IMPORTED_IMPLIB_DEBUG "${lib_path}")
+        endforeach()
+    endif()
 endif()
 
 ida_add_plugin(doki_theme

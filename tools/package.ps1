@@ -8,7 +8,10 @@
 #     doki-theme/assets/wallpapers/*.png
 #     ida-plugin.json
 #     INSTALL.md
-param([string]$Version = "0.1.0")
+param(
+    [string]$Version = "0.1.0",
+    [string]$DllPath = ""
+)
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -22,9 +25,22 @@ New-Item -ItemType Directory -Force `
   (Join-Path $stage "doki-theme\assets\stickers"),
   (Join-Path $stage "doki-theme\assets\wallpapers") | Out-Null
 
-$dll = Join-Path $env:IDASDK "src\bin\plugins\doki_theme.dll"
-if (-not (Test-Path $dll)) { $dll = Join-Path $repoRoot "build\Release\doki_theme.dll" }
-if (-not (Test-Path $dll)) { throw "doki_theme.dll not found - build first." }
+# Resolve the DLL: explicit -DllPath wins, then well-known ida-cmake output
+# locations in priority order (mirrors what CI verifies).
+$dll = ""
+if ($DllPath) {
+    if (-not (Test-Path $DllPath)) { throw "-DllPath does not exist: $DllPath" }
+    $dll = $DllPath
+} else {
+    $candidates = @(
+        (Join-Path $env:IDASDK "src\bin\plugins\doki_theme.dll"),
+        (Join-Path $repoRoot "build\output\plugins\doki_theme.dll"),
+        (Join-Path $repoRoot "build\Release\doki_theme.dll"),
+        (Join-Path $repoRoot "build\bin\plugins\doki_theme.dll")
+    )
+    $dll = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+}
+if (-not $dll) { throw "doki_theme.dll not found - build first." }
 
 Copy-Item $dll                                       (Join-Path $stage "plugins")
 Copy-Item (Join-Path $repoRoot "definitions\*.json") (Join-Path $stage "doki-theme\definitions")

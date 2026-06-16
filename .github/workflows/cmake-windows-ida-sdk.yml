@@ -1,0 +1,257 @@
+name: Build Doki Theme IDA Plugin (Windows, IDA SDK 9.2+)
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  discover-sdk-tags:
+    name: Discover IDA SDK tags
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.discover.outputs.matrix }}
+    steps:
+      - name: Pick latest public HexRaysSA/ida-sdk tag per minor (>= 9.2)
+        id: discover
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, sys, urllib.request
+
+          token = os.environ.get("GITHUB_TOKEN", "")
+          tags = []
+          page = 1
+          while True:
+              url = f"https://api.github.com/repos/HexRaysSA/ida-sdk/tags?per_page=100&page={page}"
+              req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
+              if token:
+                  req.add_header("Authorization", f"Bearer {token}")
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  data = json.load(resp)
+              if not data:
+                  break
+              tags.extend(t["name"] for t in data)
+              if len(data) < 100:
+                  break
+              page += 1
+
+          # Parse tags like v9.2, v9.2.0-release, v9.2.0-sdk.1
+          pat = re.compile(r"^v(\d+)\.(\d+)(?:\.(\d+))?(?:-([A-Za-z0-9.]+))?$")
+          parsed = []
+          for t in tags:
+              m = pat.match(t)
+              if not m:
+                  continue
+              major, minor, patch, suffix = m.groups()
+              major, minor, patch = int(major), int(minor), int(patch or 0)
+              if major != 9 or minor < 2:
+                  continue
+              # Sort key: (major, minor, patch, suffix string) descending
+              # We use tuple comparison; suffixes sort lexicographically which is fine
+              # because we only need a deterministic, well-ordered choice.
+              parsed.append(((major, minor, patch, suffix or ""), t))
+
+          # Group by (major, minor), pick the tag with the highest sort key.
+          by_minor = {}
+          for key, t in parsed:
+              mk = (key[0], key[1])
+              if mk not in by_minor or key > by_minor[mk][0]:
+                  by_minor[mk] = (key, t)
+
+          matrix = []
+          for mk in sorted(by_minor.keys()):
+              _, tag = by_minor[mk]
+              # Sanitize tag for artifact names: keep alnum, dot, dash, underscore.
+              safe = re.sub(r"[^A-Za-z0-9._-]", "_", tag)
+              matrix.append({
+                  "os": "windows-latest",
+                  "qt_arch": "win64_msvc2022_64",
+                  "qt_version": "6.8.2",
+                  "sdk_ref": tag,
+                  "sdk_minor": f"{mk[0]}.{mk[1]}",
+                  "artifact_name": f"doki-theme-ida-windows-msvc-{safe}",
+              })
+
+          if not matrix:
+              print("No matching SDK tags found among:", tags, file=sys.stderr)
+              sys.exit(1)
+
+          print("Selected SDK tags:")
+          for entry in matrix:
+              print(f"  {entry['sdk_minor']} -> {entry['sdk_ref']}")
+          with open(os.environ["GITHUB_OUTPUT"], "w") as f:
+              f.write("matrix=" + json.dumps({"include": matrix}))
+          PY
+
+  build:
+    name: Build (${{ matrix.sdk_minor }} / ${{ matrix.sdk_ref }})
+    needs: discover-sdk-tags
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.discover-sdk-tags.outputs.matrix) }}
+    env:
+      QT_VERSION: ${{ matrix.qt_version }}
+      QT_ARCH: ${{ matrix.qt_arch }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Checkout HexRaysSA/ida-sdk at ${{ matrix.sdk_ref }}
+        uses: actions/checkout@v4
+        with:
+          repository: HexRaysSA/ida-sdk
+          ref: ${{ matrix.sdk_ref }}
+          path: idasdk
+
+      - name: Verify IDA SDK Qt import libs (x64_win_qt)
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:GITHUB_WORKSPACE "idasdk\src\lib\x64_win_qt"
+          foreach ($m in @("Core","Gui","Widgets")) {
+            $p = Join-Path $dir ("Qt6${m}.lib")
+            if (-not (Test-Path $p)) { throw "Missing IDA Qt import lib: $p" }
+            Write-Host "  ok: $p"
+          }
+
+      - name: Install Qt ${{ matrix.qt_version }} (${{ matrix.qt_arch }})
+        uses: jurplel/install-qt-action@v3
+        with:
+          version: ${{ env.QT_VERSION }}
+          target: desktop
+          arch: ${{ env.QT_ARCH }}
+          cache: true
+
+      - name: Setup MSVC dev cmd (x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Configure CMake
+        shell: pwsh
+        env:
+          IDASDK: ${{ github.workspace }}\idasdk
+        run: |
+          $ErrorActionPreference = "Stop"
+          $idaQt = Join-Path $env:IDASDK "src\lib\x64_win_qt"
+          Write-Host "IDASDK = $env:IDASDK"
+          Write-Host "QT_ROOT_DIR = $env:QT_ROOT_DIR"
+          Write-Host "IDA_QT_LIB_DIR = $idaQt"
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" `
+            -DIDA_QT_LIB_DIR="$idaQt"
+
+      - name: Build (Release)
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --parallel
+
+      - name: Verify plugin DLL exists
+        id: verify_dll
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $candidates = @(
+            (Join-Path $env:GITHUB_WORKSPACE "idasdk\src\bin\plugins\doki_theme.dll"),
+            (Join-Path $env:GITHUB_WORKSPACE "build\output\plugins\doki_theme.dll"),
+            (Join-Path $env:GITHUB_WORKSPACE "build\Release\doki_theme.dll"),
+            (Join-Path $env:GITHUB_WORKSPACE "build\bin\plugins\doki_theme.dll")
+          )
+          $found = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $found) {
+            Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Filter "doki_theme.dll" -ErrorAction SilentlyContinue
+            throw "doki_theme.dll not found in any known output location."
+          }
+          Write-Host "Found DLL: $found"
+          "dll_path=$found" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Verify Qt imports (Qt6Core/Gui/Widgets, no plain QString@@)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $dll = "${{ steps.verify_dll.outputs.dll_path }}"
+          $dump = & dumpbin.exe /IMPORTS /NOLOGO $dll
+          $dumpText = ($dump -join "`n")
+          $needs = @("Qt6Core.dll","Qt6Gui.dll","Qt6Widgets.dll")
+          foreach ($n in $needs) {
+            if ($dumpText -notmatch [regex]::Escape($n)) {
+              throw "DLL is missing import dependency: $n"
+            }
+            Write-Host "  ok: imports $n"
+          }
+          # Reject obvious non-namespaced Qt public symbols (decorated as ?QString@@...).
+          $bad = Select-String -InputObject $dumpText -Pattern '^\s+\?\s*Q(String|Object|Widget|PaintDevice)\b[^@]*@@' -CaseSensitive:$false
+          if ($bad) {
+            Write-Host "Suspicious non-namespaced Qt symbols:"
+            $bad | ForEach-Object { Write-Host "  $($_.Line)" }
+            throw "DLL appears to import non-QT_NAMESPACE=QT Qt symbols."
+          }
+          Write-Host "  ok: no obvious non-namespaced public Qt imports"
+
+      - name: Write build-info.txt
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path "artifacts" | Out-Null
+          $info = @"
+          SDK ref:       ${{ matrix.sdk_ref }}
+          SDK minor:     ${{ matrix.sdk_minor }}
+          Qt version:    ${{ env.QT_VERSION }}
+          Qt arch:       ${{ env.QT_ARCH }}
+          Qt headers:    $env:QT_ROOT_DIR
+          IDA Qt lib:    ${{ github.workspace }}\idasdk\src\lib\x64_win_qt
+          Build type:    Release
+          Git SHA:      ${{ github.sha }}
+          Git ref:      ${{ github.ref }}
+          "@
+          $info | Out-File -FilePath "artifacts\build-info.txt" -Encoding utf8
+          "${{ matrix.sdk_ref }}" | Out-File -FilePath "artifacts\ida-sdk-ref.txt" -Encoding utf8
+
+      - name: Package doki-theme-ida zip
+        shell: pwsh
+        env:
+          IDASDK: ${{ github.workspace }}\idasdk
+        run: |
+          $ErrorActionPreference = "Stop"
+          $ver = "0.1.0-${{ matrix.sdk_ref }}"
+          .\tools\package.ps1 -Version $ver -DllPath "${{ steps.verify_dll.outputs.dll_path }}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            dist/*.zip
+            artifacts/*.txt
+
+  release:
+    name: Publish GitHub release (tags only)
+    if: ${{ startsWith(github.ref, 'refs/tags/') }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.zip
