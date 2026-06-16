@@ -1,4 +1,4 @@
-//----------------------------------------------------------------------------
+﻿//----------------------------------------------------------------------------
 // Doki Theme - theme.css generation implementation.
 //----------------------------------------------------------------------------
 #include "doki/css.h"
@@ -32,7 +32,11 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
 {
   std::ostringstream o;
   const char *base = pal.dark ? "dark" : "default";
-  const bool stick = opt.include_sticker && !opt.sticker_file.empty();
+  // Sticker is rendered by the Qt overlay (DokiOverlayManager) on top of the
+  // view, not by CSS. The CSS therefore never paints a sticker. Wallpaper is
+  // still CSS-driven.
+  const bool stick = false; // legacy: opt.include_sticker retained for API;
+                            // overlay is the only sticker renderer.
   const bool wall  = opt.include_wallpaper && !opt.wallpaper_file.empty();
   // Any image behind the listing requires transparent line/widget backgrounds.
   const bool transparent_bg = stick || wall;
@@ -54,9 +58,10 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   o << "@def doki_sel_bg    " << to_css_hex(pal.selection_bg) << ";\n";
   o << "@def doki_caret_row " << rgba_alpha(pal.caret_row, 0.25) << ";\n\n";
 
-  // Disassembly listing. When a sticker is shown, the per-line background must
-  // be transparent so the image painted on the widget shows through; otherwise
-  // it stays the opaque doki background. (See hex-rays.com/blog/ui-candy.)
+  // Disassembly and pseudocode listings both use CustomIDAMemo. When a
+  // wallpaper is layered behind the listing, the per-line background must
+  // be transparent so the image shows through.
+  // See https://hex-rays.com/blog/ui-candy for the official approach.
   o << "CustomIDAMemo\n{\n";
   if ( transparent_bg )
     o << "    qproperty-line-bg-default            : " << rgba_alpha(pal.lst_bg, 0.0) << ";\n";
@@ -86,73 +91,41 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   o << "    qproperty-caret                      : ${doki_fg};\n";
   o << "    qproperty-line-bg-highlight          : ${doki_caret_row};\n";
 
-  if ( stick )
+  if ( wall )
   {
-    // The sticker is painted on the memo. With a wallpaper behind it the memo
-    // base must be transparent (so the wallpaper shows through); without one
-    // the memo base is the opaque doki color.
-    o << "\n    background            : "
-      << (wall ? std::string("transparent") : to_css_hex(pal.lst_bg))
-      << " url(\"$RELPATH/" << opt.sticker_file << "\");\n";
+    // Wallpaper is painted directly on CustomIDAMemo per the official
+    // Hex-Rays blog approach. Both disassembly and pseudocode listings use
+    // CustomIDAMemo, so a single rule covers both views. The sticker is
+    // drawn by the Qt overlay on top, so it doesn't compete with CSS.
+    o << "\n    background            : ${doki_bg} url(\"$RELPATH/"
+      << opt.wallpaper_file << "\");\n";
     o << "    background-repeat     : no-repeat;\n";
-    o << "    background-position   : " << anchor_to_position(opt.sticker_anchor) << ";\n";
+    o << "    background-position   : " << anchor_to_position(opt.wallpaper_anchor) << ";\n";
     o << "    background-attachment : fixed;\n";
-  }
-  else if ( wall )
-  {
-    // No sticker but a wallpaper: keep the memo transparent so it shows.
-    o << "\n    background            : transparent;\n";
   }
   o << "}\n\n";
 
   if ( transparent_bg )
   {
-    // Keep the fringe/arrows from painting over the image(s).
+    // Keep the fringe/arrows from painting over the image.
     o << "ecfringe_t  { background: transparent; }\n";
     o << "TextArrows  { background: transparent; }\n";
+
     if ( wall )
     {
-      // The wallpaper lives on the view host, behind the (transparent) memo.
-      // Also paint it on the Hex-Rays pseudocode text area so the decompiler
-      // view shares the same background. In practice the imported base theme
-      // can still give the pseudocode viewport/child QWidget an opaque dark
-      // background, hiding the parent text_area_t background. Therefore the
-      // likely viewport child gets the same fixed wallpaper, while the margin
-      // remains explicitly transparent so it does not duplicate/cover it.
-      const std::string wall_pos = anchor_to_position(opt.wallpaper_anchor);
-      o << "IDAViewHost\n{\n";
-      o << "    background            : ${doki_bg} url(\"$RELPATH/"
-        << opt.wallpaper_file << "\");\n";
-      o << "    background-repeat     : no-repeat;\n";
-      o << "    background-position   : " << wall_pos << ";\n";
-      o << "    background-attachment : fixed;\n";
-      o << "}\n\n";
+      // Wallpaper-only: on CustomIDAMemo (blog). IDAViewHost solid,
+      // pseudocode containers transparent so nothing covers the memo.
+      o << "IDAViewHost { background: ${doki_bg}; }\n\n";
 
-      o << "text_area_t\n{\n";
-      o << "    background            : ${doki_bg} url(\"$RELPATH/"
-        << opt.wallpaper_file << "\");\n";
-      o << "    background-repeat     : no-repeat;\n";
-      o << "    background-position   : " << wall_pos << ";\n";
-      o << "    background-attachment : fixed;\n";
-      o << "}\n\n";
+      o << "text_area_t { background: transparent; }\n\n";
 
       o << "text_area_t QWidget\n{\n";
-      o << "    background            : transparent url(\"$RELPATH/"
-        << opt.wallpaper_file << "\");\n";
-      o << "    background-repeat     : no-repeat;\n";
-      o << "    background-position   : " << wall_pos << ";\n";
-      o << "    background-attachment : fixed;\n";
-      o << "    background-color      : transparent;\n";
+      o << "    background-color: transparent;\n";
       o << "}\n\n";
 
       o << "text_area_t text_area_margin_widget_t\n{\n";
-      o << "    background            : transparent;\n";
-      o << "    background-color      : transparent;\n";
+      o << "    background-color: transparent;\n";
       o << "}\n\n";
-    }
-    else
-    {
-      o << "IDAViewHost { background: ${doki_bg}; }\n\n";
     }
   }
 

@@ -12,6 +12,7 @@
 //----------------------------------------------------------------------------
 #pragma once
 
+#include <memory>
 #include <string>
 
 #include <pro.h>   // ea_t, asize_t
@@ -22,10 +23,14 @@
 namespace doki
 {
 
+// Forward declaration to keep Qt out of this header.
+class DokiOverlayManager;
+
 class ThemeApplier
 {
 public:
-  ~ThemeApplier() { shutdown(); }
+  ThemeApplier();
+  ~ThemeApplier();
 
   // Install (Phase 6) + activate + apply live nav colors. Returns false on
   // install failure. 'activate' writes the registry ThemeName;
@@ -47,6 +52,7 @@ public:
 
 private:
   void ensure_colorizer_installed();
+  void ensure_overlay_manager();
 
   IdaPalette m_palette;
   bool m_has_palette = false;
@@ -57,6 +63,9 @@ private:
 
   ea_t m_min_ea = 0;
   ea_t m_max_ea = 0;
+
+  // Lazily created on first apply() in a GUI build; destroyed in shutdown().
+  std::unique_ptr<DokiOverlayManager> m_overlay;
 };
 
 } // namespace doki

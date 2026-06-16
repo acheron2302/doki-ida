@@ -1,4 +1,4 @@
-//----------------------------------------------------------------------------
+﻿//----------------------------------------------------------------------------
 // Doki Theme - self-tests.
 //----------------------------------------------------------------------------
 #include "doki/selftest.h"
@@ -174,12 +174,10 @@ static void css_generation_test()
   for ( const auto &t : reg.themes() )
   {
     IdaPalette pal = map_theme(t);
+    // Mirror the runtime: the Qt overlay is the only sticker renderer, so
+    // include_sticker is always false in generated CSS. Wallpaper is still
+    // CSS-driven and is enabled for themes that declare a background.
     CssOptions opt;
-    opt.include_sticker = true;
-    opt.sticker_file = t.sticker.name;
-    opt.sticker_anchor = t.sticker.anchor;
-    // Mirror the runtime: enable wallpaper for any theme that declares one
-    // (the explicit-background path the plan introduces).
     if ( t.background.valid() )
     {
       opt.include_wallpaper = true;
@@ -200,17 +198,38 @@ static void css_generation_test()
     CHECK(ok, "valid CSS for %s (%u bytes, braces balanced=%s)\n",
           t.displayName.c_str(), (uint)css.size(), braces == 0 ? "yes" : "NO");
 
-    // Wallpaper assertions: themes that declared a background must emit the
-    // IDAViewHost block referencing doki_wallpaper.png, plus the pseudocode
-    // text_area_t block (so the decompiler view shares the wallpaper).
+    // CSS must NEVER emit a sticker background; the Qt overlay paints it.
+    bool sticker_file_in_css = css.find("url(\"$RELPATH/" + t.sticker.name + "\")")
+                              != std::string::npos;
+    CHECK(!sticker_file_in_css,
+          "CSS does not embed sticker %s for %s (overlay renders it)\n",
+          t.sticker.name.c_str(), t.displayName.c_str());
+
+    // Wallpaper assertions: themes that declared a background must emit
+    // the wallpaper on CustomIDAMemo itself (the official Hex-Rays blog
+    // approach), with IDAViewHost solid and text_area_t transparent so
+    // the wallpaper shows through in both disassembly and pseudocode.
     if ( t.background.valid() )
     {
-      bool wall_ok = css.find("IDAViewHost") != std::string::npos
+      // Wallpaper is ON CustomIDAMemo, not IDAViewHost.
+      bool wall_on_memo = false;
+      {
+        // Find the CustomIDAMemo block and check for doki_wallpaper.png inside it.
+        auto memo_start = css.find("CustomIDAMemo\n{");
+        auto memo_end   = css.find("\n}\n", memo_start);
+        if ( memo_start != std::string::npos && memo_end != std::string::npos )
+        {
+          std::string memo_block = css.substr(memo_start, memo_end - memo_start);
+          wall_on_memo = memo_block.find("doki_wallpaper.png") != std::string::npos;
+        }
+      }
+
+      bool wall_ok = wall_on_memo
                   && css.find("text_area_t") != std::string::npos
-                  && css.find("text_area_t QWidget") != std::string::npos
-                  && css.find("text_area_margin_widget_t") != std::string::npos
+                     // text_area_t must be transparent, not carry the wallpaper itself.
+                  && css.find("text_area_t { background: transparent; }") != std::string::npos
                   && css.find("doki_wallpaper.png") != std::string::npos;
-      CHECK(wall_ok, "wallpaper CSS (IDAViewHost + pseudocode viewport) emitted for %s\n",
+      CHECK(wall_ok, "wallpaper on CustomIDAMemo + transparent pseudocode for %s\n",
             t.displayName.c_str());
     }
 

@@ -34,11 +34,27 @@ set(DOKI_SOURCES
     src/doki/ui.cpp
     src/doki/config.cpp
     src/doki/selftest.cpp
+    src/doki/overlay.cpp
 )
 
+# Pre-built IDA-compatible Qt6 (namespaced as QT::) shipped locally.
+if(NOT DEFINED Qt6_DIR AND EXISTS "E:/dev/qt-yusa/x64win/lib/cmake/Qt6")
+    set(Qt6_DIR "E:/dev/qt-yusa/x64win/lib/cmake/Qt6")
+    message(STATUS "Using pre-built Qt6 at E:/dev/qt-yusa/x64win")
+endif()
+
 ida_add_plugin(doki_theme
+    TYPE QT
+    QT_COMPONENTS Core Gui Widgets
     SOURCES
         ${DOKI_SOURCES}
+    DEFINES
+        QT_NAMESPACE=QT
+        QT_CORE_LIB
+        QT_DLL
+        QT_GUI_LIB
+        QT_THREAD_SUPPORT
+        QT_WIDGETS_LIB
 )
 
 target_include_directories(doki_theme PRIVATE

@@ -93,7 +93,10 @@ InstallResult install_theme(const DokiThemeDefinition &def, bool activate,
     return r;
   }
 
-  // Copy the sticker next to the css so the CSS $RELPATH can find it.
+  // Copy the sticker next to the css so the overlay manager can find it
+  // at runtime. The Qt overlay (DokiOverlayManager) is the sole sticker
+  // renderer; we explicitly do NOT set opt.include_sticker so the generated
+  // CSS never paints a duplicate sticker on CustomIDAMemo.
   CssOptions opt;
   if ( with_sticker && def.sticker.valid() )
   {
@@ -101,9 +104,7 @@ InstallResult install_theme(const DokiThemeDefinition &def, bool activate,
     const std::string dst = path_join(dir, def.sticker.name);
     if ( copy_binary_file(src, dst) )
     {
-      opt.include_sticker = true;
-      opt.sticker_file = def.sticker.name;
-      opt.sticker_anchor = def.sticker.anchor;
+      // opt.include_sticker stays false; overlay paints the sticker.
       r.sticker_installed = true;
     }
     else

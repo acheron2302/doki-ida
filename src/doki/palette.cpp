@@ -64,9 +64,19 @@ IdaPalette map_theme(const DokiThemeDefinition &def)
   p.lst_register = pick(def, {"keyColor", "accentColor"}, p.accent);
 
   // --- nav band ---
-  p.nav_start     = pick(def, {"startColor", "accentColor"}, p.accent);
-  p.nav_stop      = pick(def, {"stopColor", "accentColor"}, p.accent);
-  p.nav_highlight = pick(def, {"highlightColor", "accentColor"}, p.accent);
+  // The nav band should look like IDA's default band, not the doki accent.
+  // We fall back to a neutral dark/light gray (matching IDA's built-in nav
+  // band tint) instead of `p.accent`. Themes that explicitly define
+  // startColor / stopColor / highlightColor still get a gradient.
+  const Rgba def_nav = def.dark
+                      ? Rgba{0x1f,0x1f,0x1f,255}
+                      : Rgba{0xf0,0xf0,0xf0,255};
+  const Rgba def_nav_hi = def.dark
+                         ? Rgba{0x39,0x5a,0x94,255}
+                         : Rgba{0xc4,0xd2,0xea,255};
+  p.nav_start     = pick(def, {"startColor"}, def_nav);
+  p.nav_stop      = pick(def, {"stopColor"},  def_nav);
+  p.nav_highlight = pick(def, {"highlightColor"}, def_nav_hi);
 
   return p;
 }

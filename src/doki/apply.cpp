@@ -4,12 +4,16 @@
 #include "doki/apply.h"
 #include "doki/installer.h"
 #include "doki/log.h"
+#include "doki/overlay.h"
 
 #include <ida.hpp>
 #include <kernwin.hpp>
 
 namespace doki
 {
+
+ThemeApplier::ThemeApplier()  = default;
+ThemeApplier::~ThemeApplier() = default;
 
 // C-style trampoline matching nav_colorizer_t; forwards to the applier.
 static uint32 idaapi doki_nav_colorizer(ea_t ea, asize_t nbytes, void *ud)
@@ -51,6 +55,15 @@ void ThemeApplier::ensure_colorizer_installed()
   m_colorizer_installed = true;
 }
 
+void ThemeApplier::ensure_overlay_manager()
+{
+  if ( m_overlay )
+    return;
+  // The DokiOverlayManager constructor no-ops in tty mode and when Qt is not
+  // available, so this is safe in all contexts.
+  m_overlay = std::make_unique<DokiOverlayManager>();
+}
+
 bool ThemeApplier::apply(const DokiThemeDefinition &def, bool activate,
                          bool with_sticker, bool with_wallpaper)
 {
@@ -67,6 +80,25 @@ bool ThemeApplier::apply(const DokiThemeDefinition &def, bool activate,
   refresh_navband(true);
   refresh_idaview_anyway();
 
+  // Drive the Qt overlay from the same install result. The overlay is the
+  // only sticker renderer in the Qt build; CSS no longer paints it.
+  ensure_overlay_manager();
+  if ( m_overlay )
+  {
+    // Anchor: pinned to bottom-right by request, regardless of what the
+    // theme's JSON says (most Doki definitions still carry an old "right"
+    // anchor from their CSS-only days). Switch the literal here to
+    // "left" / "right" / "top" / "center" / "bottom" as needed.
+    static const char *kOverlayAnchor = "bottom";
+
+    m_overlay->update(res.theme_name,
+                      def.sticker.name,
+                      kOverlayAnchor,
+                      100,
+                      with_sticker,
+                      res.sticker_installed);
+  }
+
   doki::msg_log("applied '%s'. Nav band updated live; restart IDA (or "
                 "reselect in Options > Colors) to apply the full theme.\n",
                 def.displayName.c_str());
@@ -75,6 +107,14 @@ bool ThemeApplier::apply(const DokiThemeDefinition &def, bool activate,
 
 void ThemeApplier::shutdown()
 {
+  // Tear down the overlay first so we never leave a stuck Qt widget behind
+  // even if the nav colorizer was never installed (e.g. tty_idalib).
+  if ( m_overlay )
+  {
+    m_overlay->shutdown();
+    m_overlay.reset();
+  }
+
   if ( !m_colorizer_installed )
     return;
   // Restore whatever colorizer was active before us.
