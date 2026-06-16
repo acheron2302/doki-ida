@@ -12,6 +12,13 @@ character's palette, with the character's artwork shown behind the listing.
 > Darkness — dark/light) as a working set; more can be added by dropping in
 > definitions + assets.
 
+## Screenshots
+
+Darkness (dark variant) — disassembly listing, navigation band, chrome and
+sticker all recolored from the character's palette:
+
+![Doki Theme — Darkness (dark)](docs/screenshots/doki-theme-darkness-dark.png)
+
 ## Features
 - Character themes parsed from upstream `*.master.definition.json` files.
 - Generates IDA `theme.css` (imports the matching `dark`/`default` base, then
