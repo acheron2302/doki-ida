@@ -113,6 +113,24 @@ jobs:
           ref: ${{ matrix.sdk_ref }}
           path: idasdk
 
+      # Some public SDK tags (e.g. v9.3.1-release, v9.2.0-sdk.1) do not bundle
+      # ida-cmake/. Fall back to allthingsida/ida-cmake in that case so the
+      # SDK tree itself remains pristine.
+      - name: Ensure ida-cmake is available
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $bootstrap = Join-Path $env:GITHUB_WORKSPACE "idasdk\ida-cmake\bootstrap.cmake"
+          if (Test-Path $bootstrap) {
+            Write-Host "ida-cmake already provided by SDK at $bootstrap"
+            exit 0
+          }
+          Write-Host "SDK does not contain ida-cmake/; cloning allthingsida/ida-cmake as fallback."
+          git clone --depth 1 https://github.com/allthingsida/ida-cmake.git `
+            (Join-Path $env:GITHUB_WORKSPACE "idasdk\ida-cmake")
+          if (-not (Test-Path $bootstrap)) { throw "ida-cmake fallback clone did not produce $bootstrap" }
+          Write-Host "ida-cmake fallback ready: $bootstrap"
+
       - name: Verify IDA SDK Qt import libs (x64_win_qt)
         shell: pwsh
         run: |
