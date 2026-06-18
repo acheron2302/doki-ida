@@ -26,8 +26,10 @@ namespace doki
 {
 
 // Transparent child widget. Lives on top of a target QWidget (the IDA view
-// or pseudocode view), fills the target rect, and paints only the sticker
-// pixmap at the configured anchor. Mouse/keyboard input pass through.
+// or pseudocode view), fills the target rect, and paints the sticker pixmap
+// at the configured anchor. Mouse/keyboard input pass through. Visual alpha
+// comes from the upstream sticker PNG itself; we paint at full painter
+// opacity to honor the baked alpha of the official Doki assets.
 class DokiStickerOverlayWidget : public QWidget
 {
 public:
@@ -35,8 +37,7 @@ public:
 
   // Configure content. Pass an empty path to clear.
   void set_sticker(const QString &png_path,
-                   const std::string &anchor,
-                   int opacity_percent);
+                   const std::string &anchor);
 
   // Re-attach to a different target widget. Installs/removes an event filter
   // on the previous and new target. Re-parents this widget under the new
@@ -49,6 +50,9 @@ public:
 
   // Show/hide with the same visibility as the target.
   void sync_visibility();
+
+  // Clear sticker pixmap/path and hide without changing the current target.
+  void clear_sticker();
 
   // Clear target, remove event filter, hide. Used by manager on shutdown.
   void clear_target();
@@ -64,12 +68,11 @@ private:
   QPixmap  m_pixmap;
   QString  m_pixmap_path;        // for diagnostics + reload
   std::string m_anchor = "bottom"; // center|left|right|top|bottom
-  qreal    m_opacity = 1.0;      // 0..1
   QPointer<QWidget> m_target;
 };
 
 // Manager that owns the single overlay widget and the HT_UI hook. One
-// instance per ThemeApplier. Activates on apply(), tears down on shutdown().
+// instance per ThemeApplier. Activates on update(), tears down on shutdown().
 // All methods are safe to call multiple times.
 class DokiOverlayManager : public event_listener_t
 {
@@ -82,7 +85,6 @@ public:
   void update(const std::string &installed_theme_name,
               const std::string &sticker_file,
               const std::string &sticker_anchor,
-              int opacity_percent,
               bool with_sticker,
               bool sticker_installed);
 
@@ -101,6 +103,10 @@ private:
   // Hook the active viewer/widget and place the overlay on it.
   void attach_to_current();
 
+  // Disable overlay state until the next successful update(). Clears the
+  // pixmap and target event filter so window events cannot resurrect it.
+  void disable_overlay();
+
   // Compute installed sticker PNG path. Returns empty if not found.
   QString resolve_sticker_path(const std::string &installed_theme_name,
                                 const std::string &sticker_file) const;
@@ -109,7 +115,6 @@ private:
   bool m_enabled = false;            // true once a sticker is shown
   QString m_current_pixmap_path;     // last loaded path
   std::string m_current_anchor;
-  int m_current_opacity = 100;
   std::string m_current_theme_name;  // for diagnostics
   std::string m_current_sticker_file; // for diagnostics
 

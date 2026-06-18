@@ -94,15 +94,48 @@ bool ThemeApplier::apply(const DokiThemeDefinition &def, bool activate,
     m_overlay->update(res.theme_name,
                       def.sticker.name,
                       kOverlayAnchor,
-                      100,
                       with_sticker,
                       res.sticker_installed);
   }
 
-  doki::msg_log("applied '%s'. Nav band updated live; restart IDA (or "
-                "reselect in Options > Colors) to apply the full theme.\n",
-                def.displayName.c_str());
+  if ( activate )
+  {
+    doki::msg_log("applied '%s'. Nav band updated live; restart IDA (or "
+                  "reselect in Options > Colors) to apply the full theme.\n",
+                  def.displayName.c_str());
+  }
+  else
+  {
+    doki::msg_log("applied '%s'. Nav band updated live; IDA theme left unchanged.\n",
+                  def.displayName.c_str());
+  }
   return true;
+}
+
+void ThemeApplier::apply_live_only(const DokiThemeDefinition &def,
+                                   bool with_sticker)
+{
+  m_palette = map_theme(def);
+  m_has_palette = true;
+  m_min_ea = inf_get_min_ea();
+  m_max_ea = inf_get_max_ea();
+
+  ensure_colorizer_installed();
+  refresh_navband(true);
+  refresh_idaview_anyway();
+
+  // The sticker overlay reads from the already-installed theme folder,
+  // so no network fetch is involved here.
+  ensure_overlay_manager();
+  if ( m_overlay )
+  {
+    static const char *kOverlayAnchor = "bottom";
+    m_overlay->update(theme_name_for(def),
+                      def.sticker.name,
+                      kOverlayAnchor,
+                      with_sticker,
+                      /*sticker_installed=*/true);
+  }
 }
 
 void ThemeApplier::shutdown()

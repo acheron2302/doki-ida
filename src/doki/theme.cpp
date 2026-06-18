@@ -6,6 +6,7 @@
 #include <fstream>
 #include <cctype>
 #include <algorithm>
+#include <unordered_map>
 
 #include <nlohmann/json.hpp>
 
@@ -64,6 +65,67 @@ static void resolve_references(std::map<std::string, std::string> *colors)
 }
 
 //----------------------------------------------------------------------------
+// Authoritative CDN-relative path lookup for the bundled themes.
+//
+// All sticker / wallpaper filenames are known up front, so the parser
+// attaches their authoritative upstream path here. Definitions remain
+// focused on color metadata; assets are owned by the CDN.
+//
+// Adding a new theme? Add entries to both maps and ship a definition JSON.
+struct RemotePathLookup
+{
+  std::unordered_map<std::string, std::string> stickers;
+  std::unordered_map<std::string, std::string> backgrounds;
+};
+
+static const RemotePathLookup &remote_path_lookup()
+{
+  static const RemotePathLookup kTable = {
+    // Stickers (nested upstream layout, verified during planning).
+    {
+      { "rem.png",               "stickers/vscode/reZero/rem/rem.png" },
+      { "zero_two_obsidian.png", "stickers/vscode/franxx/zeroTwo/obsidian/zero_two_obsidian.png" },
+      { "zero_two_sakura.png",   "stickers/vscode/franxx/zeroTwo/sakura/zero_two_sakura.png" },
+      { "darkness_dark.png",     "stickers/vscode/konoSuba/darkness/dark/darkness_dark.png" },
+      { "darkness_light.png",    "stickers/vscode/konoSuba/darkness/light/darkness_light.png" },
+    },
+    // Backgrounds live under "backgrounds/wallpapers/transparent/<file>".
+    // We use the transparent variant so the doki palette + code listing
+    // show through wherever the artwork has no content. The opaque
+    // counterpart in "backgrounds/<file>" is the same character on a
+    // baked background; we deliberately do not use it.
+    {
+      { "rem.png",               "backgrounds/wallpapers/transparent/rem.png" },
+      { "zero_two_obsidian.png", "backgrounds/wallpapers/transparent/zero_two_obsidian.png" },
+      { "zero_two_sakura.png",   "backgrounds/wallpapers/transparent/zero_two_sakura.png" },
+      { "darkness_dark.png",     "backgrounds/wallpapers/transparent/darkness_dark.png" },
+      { "darkness_light.png",    "backgrounds/wallpapers/transparent/darkness_light.png" },
+    },
+  };
+  return kTable;
+}
+
+static void fill_sticker_remote_path(DokiSticker *s)
+{
+  if ( s == nullptr || s->name.empty() )
+    return;
+  const auto &tbl = remote_path_lookup().stickers;
+  auto it = tbl.find(s->name);
+  if ( it != tbl.end() )
+    s->remote_path = it->second;
+}
+
+static void fill_background_remote_path(DokiBackground *b)
+{
+  if ( b == nullptr || b->name.empty() )
+    return;
+  const auto &tbl = remote_path_lookup().backgrounds;
+  auto it = tbl.find(b->name);
+  if ( it != tbl.end() )
+    b->remote_path = it->second;
+}
+
+//----------------------------------------------------------------------------
 static void parse_sticker(const json &node, DokiSticker *out)
 {
   if ( !node.is_object() )
@@ -72,8 +134,7 @@ static void parse_sticker(const json &node, DokiSticker *out)
     out->name = node["name"].get<std::string>();
   if ( node.contains("anchor") && node["anchor"].is_string() )
     out->anchor = node["anchor"].get<std::string>();
-  if ( node.contains("opacity") && node["opacity"].is_number() )
-    out->opacity = node["opacity"].get<int>();
+  fill_sticker_remote_path(out);
 }
 
 // Mirror of parse_sticker for the optional top-level "background" object.
@@ -85,8 +146,7 @@ static void parse_background(const json &node, DokiBackground *out)
     out->name = node["name"].get<std::string>();
   if ( node.contains("anchor") && node["anchor"].is_string() )
     out->anchor = node["anchor"].get<std::string>();
-  if ( node.contains("opacity") && node["opacity"].is_number() )
-    out->opacity = node["opacity"].get<int>();
+  fill_background_remote_path(out);
 }
 
 //----------------------------------------------------------------------------

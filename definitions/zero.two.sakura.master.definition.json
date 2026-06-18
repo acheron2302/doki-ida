@@ -12,6 +12,10 @@
       "opacity": 13
     }
   },
+  "background": {
+    "name": "zero_two_sakura.png",
+    "anchor": "center"
+  },
   "overrides": {
     "editorScheme": {
       "colors": {

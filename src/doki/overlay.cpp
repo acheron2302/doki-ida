@@ -17,9 +17,10 @@
 #include <QApplication>
 #include <QFileInfo>
 #include <QString>
+#include <QTimer>
 
 #include <algorithm>
-#include <cmath>
+#include <functional>
 
 namespace doki
 {
@@ -50,9 +51,6 @@ Anchor parse_anchor(const std::string &s)
   if ( s == "bottom" ) return Anchor::Bottom;
   return Anchor::Right; // default: corner mascot
 }
-
-// Bound an integer to [lo, hi].
-int clampi(int v, int lo, int hi) { return std::max(lo, std::min(hi, v)); }
 
 // Compute the destination rect for the sticker inside `bounds` (the
 // overlay's geometry). The sticker is painted at its NATIVE pixel size
@@ -117,11 +115,9 @@ DokiStickerOverlayWidget::DokiStickerOverlayWidget(QWidget *parent)
 }
 
 void DokiStickerOverlayWidget::set_sticker(const QString &png_path,
-                                           const std::string &anchor,
-                                           int opacity_percent)
+                                           const std::string &anchor)
 {
   m_anchor = anchor;
-  m_opacity = qreal(clampi(opacity_percent, 0, 100)) / qreal(100.0);
   m_pixmap_path = png_path;
 
   if ( png_path.isEmpty() || !QFileInfo(png_path).isFile() )
@@ -175,16 +171,19 @@ void DokiStickerOverlayWidget::set_target(QWidget *target)
 
 void DokiStickerOverlayWidget::update_geometry()
 {
-  if ( m_target )
+  // QPointer guard: m_target may have been destroyed between event filter
+  // callbacks if IDA tore down the view underneath us.
+  if ( m_target.isNull() )
   {
-    // Cover the full target rect.
-    setGeometry(m_target->rect());
-    sync_visibility();
-  }
-  else
-  {
+    m_target = nullptr;
     hide();
+    return;
   }
+  // Cover the full target rect.
+  setGeometry(m_target->rect());
+  raise();
+  sync_visibility();
+  update();
 }
 
 void DokiStickerOverlayWidget::sync_visibility()
@@ -201,6 +200,14 @@ void DokiStickerOverlayWidget::sync_visibility()
   {
     if ( isVisible() ) hide();
   }
+}
+
+void DokiStickerOverlayWidget::clear_sticker()
+{
+  m_pixmap = QPixmap();
+  m_pixmap_path.clear();
+  update();
+  hide();
 }
 
 void DokiStickerOverlayWidget::clear_target()
@@ -223,7 +230,9 @@ void DokiStickerOverlayWidget::paintEvent(QPaintEvent *)
   if ( !p.isActive() )
     return;
   p.setRenderHint(QPainter::SmoothPixmapTransform, true);
-  p.setOpacity(m_opacity);
+  // Visual alpha is the upstream PNG's own baked alpha. We paint at full
+  // painter opacity; the PNG's per-pixel alpha does the rest.
+  p.setOpacity(1.0);
 
   const QRect bounds = rect();
   const QRect dst = compute_dest_rect(bounds, m_pixmap.size(),
@@ -247,6 +256,12 @@ bool DokiStickerOverlayWidget::eventFilter(QObject *watched, QEvent *event)
     case QEvent::ParentChange:
     case QEvent::ZOrderChange:
       update_geometry();
+      break;
+    case QEvent::ChildAdded:
+      // IDA swaps inner view children (e.g. when switching between
+      // disassembly and pseudocode). Defer the re-raise to the next event
+      // loop tick so the new child is fully realized first.
+      QTimer::singleShot(0, this, [this] { update_geometry(); });
       break;
     default:
       break;
@@ -293,6 +308,18 @@ void DokiOverlayManager::shutdown()
   // unhook_event_listener(HT_UI, this) here to avoid double-unhook.
 }
 
+void DokiOverlayManager::disable_overlay()
+{
+  m_enabled = false;
+  m_current_pixmap_path.clear();
+  m_current_anchor.clear();
+  if ( m_overlay )
+  {
+    m_overlay->clear_sticker();
+    m_overlay->clear_target();
+  }
+}
+
 QString DokiOverlayManager::resolve_sticker_path(
     const std::string &installed_theme_name,
     const std::string &sticker_file) const
@@ -304,7 +331,7 @@ QString DokiOverlayManager::resolve_sticker_path(
       path_join(themes_dir(), installed_theme_name), sticker_file);
   if ( QFileInfo(QString::fromStdString(primary)).isFile() )
     return QString::fromStdString(primary);
-  // Fallback: assets/stickers/<sticker>
+  // Fallback: assets/stickers/<sticker> (compatibility / offline use).
   const std::string fallback = path_join(
       path_join(assets_dir(), "stickers"), sticker_file);
   if ( QFileInfo(QString::fromStdString(fallback)).isFile() )
@@ -315,7 +342,6 @@ QString DokiOverlayManager::resolve_sticker_path(
 void DokiOverlayManager::update(const std::string &installed_theme_name,
                                 const std::string &sticker_file,
                                 const std::string &sticker_anchor,
-                                int opacity_percent,
                                 bool with_sticker,
                                 bool sticker_installed)
 {
@@ -327,9 +353,7 @@ void DokiOverlayManager::update(const std::string &installed_theme_name,
 
   if ( !with_sticker || !sticker_installed || sticker_file.empty() )
   {
-    if ( m_overlay )
-      m_overlay->hide();
-    m_enabled = false;
+    disable_overlay();
     return;
   }
 
@@ -338,19 +362,16 @@ void DokiOverlayManager::update(const std::string &installed_theme_name,
   {
     doki::msg_log("  overlay: sticker '%s' not found in theme or assets\n",
                   sticker_file.c_str());
-    if ( m_overlay )
-      m_overlay->hide();
-    m_enabled = false;
+    disable_overlay();
     return;
   }
 
   if ( !m_overlay )
     m_overlay = new DokiStickerOverlayWidget();
 
-  m_overlay->set_sticker(path, sticker_anchor, opacity_percent);
+  m_overlay->set_sticker(path, sticker_anchor);
   m_current_pixmap_path = path;
   m_current_anchor      = sticker_anchor;
-  m_current_opacity     = opacity_percent;
   m_enabled = true;
 
   attach_to_current();
@@ -358,37 +379,98 @@ void DokiOverlayManager::update(const std::string &installed_theme_name,
 
 QWidget *DokiOverlayManager::choose_target_widget()
 {
-  // 1) Active viewer (disassembly / pseudocode / custom viewer).
+  // Helper: walk the descendants of `root` and return the first widget whose
+  // class name or object name matches the IDA paint surface markers
+  // ("CustomIDAMemo" for the listing, "text_area_t" for the Hex-Rays
+  // pseudocode widget). Depth-first, so the inner-most match wins.
+  auto find_paint_surface = [](QWidget *root) -> QWidget * {
+    if ( root == nullptr )
+      return nullptr;
+    QWidget *match = nullptr;
+    std::function<void(QWidget *)> walk = [&](QWidget *w) {
+      if ( w == nullptr )
+        return;
+      const QMetaObject *mo = w->metaObject();
+      const QString cname = mo ? QString::fromLatin1(mo->className())
+                               : QString::fromLatin1(w->metaObject()->className());
+      const QString oname = w->objectName();
+      const bool is_memo = cname.contains("CustomIDAMemo")
+                        || oname.contains("CustomIDAMemo");
+      const bool is_text = cname.contains("text_area_t")
+                        || oname.contains("text_area_t");
+      if ( is_memo || is_text )
+      {
+        if ( match == nullptr )
+          match = w;
+        return; // don't descend into the matched surface
+      }
+      const auto kids = w->findChildren<QWidget *>(QString(), Qt::FindDirectChildrenOnly);
+      for ( QWidget *k : kids )
+        walk(k);
+    };
+    walk(root);
+    return match;
+  };
+
+  // 1) Preferred: the actual paint surface inside the active viewer. The
+  //    active viewer is the top-level IDA "view" widget, but the actual
+  //    QWidget we want to cover is its CustomIDAMemo / text_area_t child
+  //    (the one whose paint is the disassembly / pseudocode).
   TWidget *viewer = get_current_viewer();
   if ( viewer != nullptr )
+  {
+    if ( QWidget *surface = find_paint_surface((QWidget *)viewer) )
+      return surface;
     return (QWidget *) viewer;
+  }
 
-  // 2) Active widget (any focus widget).
+  // 2) Active widget (any focus widget) - try the same surface search first.
   TWidget *cur = get_current_widget();
   if ( cur != nullptr )
+  {
+    if ( QWidget *surface = find_paint_surface((QWidget *)cur) )
+      return surface;
     return (QWidget *) cur;
+  }
 
   return nullptr;
 }
 
 void DokiOverlayManager::attach_to_current()
 {
-  if ( !m_overlay || !m_enabled )
+  if ( !m_enabled )
+  {
+    if ( m_overlay )
+    {
+      m_overlay->clear_sticker();
+      m_overlay->clear_target();
+    }
     return;
+  }
 
   QWidget *target = choose_target_widget();
   if ( target == nullptr )
   {
-    // No active target yet; keep overlay hidden, will retry on next event.
-    m_overlay->hide();
+    if ( m_overlay )   m_overlay->hide();
+    doki::msg_log("  overlay: no active viewer/widget to attach to\n");
     return;
   }
 
-  m_overlay->set_target(target);
+  if ( m_overlay && m_enabled )
+    m_overlay->set_target(target);
+
+  if ( m_overlay && m_enabled )
+    m_overlay->raise();
 }
 
 ssize_t idaapi DokiOverlayManager::on_event(ssize_t code, va_list va)
 {
+  // Ignore UI churn while the user has disabled the sticker. This prevents
+  // minimize/restore, active-widget changes, and child-widget swaps from
+  // reattaching or showing a stale overlay.
+  if ( !m_enabled )
+    return 0;
+
   // We only care about a few HT_UI notifications.
   switch ( code )
   {

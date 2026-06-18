@@ -12,6 +12,10 @@
       "opacity": 13
     }
   },
+  "background": {
+    "name": "zero_two_obsidian.png",
+    "anchor": "center"
+  },
   "overrides": {
     "editorScheme": {
       "colors": {

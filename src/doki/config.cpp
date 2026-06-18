@@ -31,10 +31,14 @@ DokiConfig load_config()
   {
     json j;
     ifs >> j;
-    cfg.selected_id      = j.value("selectedId", std::string());
-    cfg.sticker_enabled  = j.value("stickerEnabled", true);
+    cfg.selected_id       = j.value("selectedId", std::string());
+    cfg.sticker_enabled   = j.value("stickerEnabled", true);
     cfg.wallpaper_enabled = j.value("wallpaperEnabled", true);
-    cfg.original_theme   = j.value("originalTheme", std::string());
+    cfg.original_theme    = j.value("originalTheme", std::string());
+
+    // Legacy fields from the removed coordinated-background / glass-pane
+    // feature are silently ignored. They will disappear on the next save
+    // because save_config() no longer writes them.
   }
   catch ( const std::exception &e )
   {

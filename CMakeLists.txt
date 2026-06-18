@@ -35,6 +35,7 @@ set(DOKI_SOURCES
     src/doki/config.cpp
     src/doki/selftest.cpp
     src/doki/overlay.cpp
+    src/doki/assets.cpp
 )
 
 # Locate Qt6 for the plugin target.
@@ -51,7 +52,7 @@ endif()
 
 # Explicit early find_package so we can override imported target properties
 # (IDA Qt import libs) before ida_add_plugin appends Qt6::* to the link list.
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
 
 # Override Qt6::{Core,Gui,Widgets} import libs with the IDA SDK's QT_NAMESPACE=QT
 # Qt import libraries (idasdk/src/lib/x64_win_qt). Linking against a public Qt
@@ -87,7 +88,7 @@ endif()
 
 ida_add_plugin(doki_theme
     TYPE QT
-    QT_COMPONENTS Core Gui Widgets
+    QT_COMPONENTS Core Gui Widgets Network
     SOURCES
         ${DOKI_SOURCES}
     DEFINES
@@ -95,6 +96,7 @@ ida_add_plugin(doki_theme
         QT_CORE_LIB
         QT_DLL
         QT_GUI_LIB
+        QT_NETWORK_LIB
         QT_THREAD_SUPPORT
         QT_WIDGETS_LIB
 )

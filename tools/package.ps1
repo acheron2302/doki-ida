@@ -4,10 +4,12 @@
 #   dist/doki-theme-ida/
 #     plugins/doki_theme.dll
 #     doki-theme/definitions/*.json
-#     doki-theme/assets/stickers/*.png
-#     doki-theme/assets/wallpapers/*.png
 #     ida-plugin.json
 #     INSTALL.md
+#
+# Sticker and wallpaper assets are downloaded on demand from the
+# doki-theme CDN (see src/doki/assets.cpp) and cached under
+# $IDAUSR\doki-theme\cache\. They are NOT bundled in this package.
 param(
     [string]$Version = "0.1.0",
     [string]$DllPath = ""
@@ -21,9 +23,7 @@ $zip   = Join-Path $repoRoot "dist\doki-theme-ida-$Version.zip"
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force `
   (Join-Path $stage "plugins"),
-  (Join-Path $stage "doki-theme\definitions"),
-  (Join-Path $stage "doki-theme\assets\stickers"),
-  (Join-Path $stage "doki-theme\assets\wallpapers") | Out-Null
+  (Join-Path $stage "doki-theme\definitions") | Out-Null
 
 # Resolve the DLL: explicit -DllPath wins, then well-known ida-cmake output
 # locations in priority order (mirrors what CI verifies).
@@ -44,12 +44,13 @@ if (-not $dll) { throw "doki_theme.dll not found - build first." }
 
 Copy-Item $dll                                       (Join-Path $stage "plugins")
 Copy-Item (Join-Path $repoRoot "definitions\*.json") (Join-Path $stage "doki-theme\definitions")
-Copy-Item (Join-Path $repoRoot "assets\stickers\*.png") (Join-Path $stage "doki-theme\assets\stickers")
-if (Test-Path (Join-Path $repoRoot "assets\wallpapers")) {
-  Copy-Item (Join-Path $repoRoot "assets\wallpapers\*.png") (Join-Path $stage "doki-theme\assets\wallpapers")
-}
 Copy-Item (Join-Path $repoRoot "ida-plugin.json")    $stage
 Copy-Item (Join-Path $repoRoot "INSTALL.md")         $stage
+# Keep attribution in the package even though bundled images are gone.
+if (Test-Path (Join-Path $repoRoot "assets\ATTRIBUTION.md")) {
+  Copy-Item (Join-Path $repoRoot "assets\ATTRIBUTION.md") `
+            (Join-Path $stage "doki-theme\ATTRIBUTION.md")
+}
 
 if (Test-Path $zip) { Remove-Item $zip }
 Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip

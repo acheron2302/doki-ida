@@ -1,7 +1,19 @@
 //----------------------------------------------------------------------------
 // Doki Theme - installer implementation.
+//
+// Installs a definition as a real IDA theme folder under
+// $IDAUSR/themes/<theme_name>/. The folder contains a generated theme.css
+// plus the sticker image and the wallpaper (when present) so that the
+// CSS $RELPATH lookup resolves. Activation sets HKCU\..\IDA\ThemeName,
+// which IDA reads to pick the theme at startup.
+//
+// Sticker and wallpaper assets are normally obtained on demand from the
+// authoritative Doki CDN via the asset manager. The legacy
+// $IDAUSR/doki-theme/assets/{stickers,wallpapers}/ folders are accepted as
+// a compatibility / offline fallback only.
 //----------------------------------------------------------------------------
 #include "doki/installer.h"
+#include "doki/assets.h"
 #include "doki/paths.h"
 #include "doki/palette.h"
 #include "doki/css.h"
@@ -79,6 +91,50 @@ std::string current_theme()
 // collides with a sticker that happens to share the source file name).
 static const char *const WALLPAPER_FILE = "doki_wallpaper.png";
 
+// Resolve a local source for an asset. The CDN cache is the primary path;
+// the legacy assets/ folder is accepted as a compatibility fallback.
+static std::string resolve_sticker_source(const DokiSticker &s)
+{
+  if ( s.name.empty() )
+    return std::string();
+  // 1) Authoritative CDN cache (downloaded on demand).
+  if ( !s.remote_path.empty() )
+  {
+    const std::string cached = ensure_asset(AssetKind::Sticker, s.name,
+                                            s.remote_path);
+    if ( !cached.empty() )
+      return cached;
+  }
+  // 2) Legacy / offline fallback: $IDAUSR/doki-theme/assets/stickers/<name>.
+  const std::string legacy = path_join(
+      path_join(assets_dir(), "stickers"), s.name);
+  std::ifstream test(legacy, std::ios::binary);
+  if ( test )
+    return legacy;
+  return std::string();
+}
+
+static std::string resolve_wallpaper_source(const DokiBackground &b)
+{
+  if ( b.name.empty() )
+    return std::string();
+  // 1) Authoritative CDN cache.
+  if ( !b.remote_path.empty() )
+  {
+    const std::string cached = ensure_asset(AssetKind::Wallpaper, b.name,
+                                            b.remote_path);
+    if ( !cached.empty() )
+      return cached;
+  }
+  // 2) Legacy / offline fallback.
+  const std::string legacy = path_join(
+      path_join(assets_dir(), "wallpapers"), b.name);
+  std::ifstream test(legacy, std::ios::binary);
+  if ( test )
+    return legacy;
+  return std::string();
+}
+
 InstallResult install_theme(const DokiThemeDefinition &def, bool activate,
                             bool with_sticker, bool with_wallpaper)
 {
@@ -95,50 +151,43 @@ InstallResult install_theme(const DokiThemeDefinition &def, bool activate,
 
   // Copy the sticker next to the css so the overlay manager can find it
   // at runtime. The Qt overlay (DokiOverlayManager) is the sole sticker
-  // renderer; we explicitly do NOT set opt.include_sticker so the generated
-  // CSS never paints a duplicate sticker on CustomIDAMemo.
+  // renderer; we explicitly do NOT set opt.include_sticker (removed) so
+  // the generated CSS never paints a duplicate sticker on CustomIDAMemo.
   CssOptions opt;
   if ( with_sticker && def.sticker.valid() )
   {
-    const std::string src = path_join(path_join(assets_dir(), "stickers"), def.sticker.name);
+    const std::string src = resolve_sticker_source(def.sticker);
     const std::string dst = path_join(dir, def.sticker.name);
-    if ( copy_binary_file(src, dst) )
+    if ( !src.empty() && copy_binary_file(src, dst) )
     {
-      // opt.include_sticker stays false; overlay paints the sticker.
+      // Sticker is rendered by the Qt overlay; CSS keeps it out.
       r.sticker_installed = true;
     }
     else
     {
-      doki::msg_log("  sticker not found, skipping: %s\n", src.c_str());
+      doki::msg_log("  sticker not available, skipping: %s\n",
+                    def.sticker.name.c_str());
     }
   }
 
-  // Optional wallpaper: prefer the explicit "background" block from the
-  // definition; fall back to assets/wallpapers/<sticker name> for legacy
-  // definitions that don't declare one.
-  if ( with_wallpaper )
+  // Optional wallpaper. Every bundled theme declares a "background" block
+  // (the parser fills its remote_path from the authoritative CDN lookup).
+  if ( with_wallpaper && def.background.valid() )
   {
-    std::string wall_name;
-    if ( def.background.valid() )
-      wall_name = def.background.name;
-    else if ( def.sticker.valid() )
-      wall_name = def.sticker.name;
-
-    if ( !wall_name.empty() )
+    const std::string src = resolve_wallpaper_source(def.background);
+    const std::string dst = path_join(dir, WALLPAPER_FILE);
+    if ( !src.empty() && copy_binary_file(src, dst) )
     {
-      const std::string src = path_join(path_join(assets_dir(), "wallpapers"), wall_name);
-      const std::string dst = path_join(dir, WALLPAPER_FILE);
-      if ( copy_binary_file(src, dst) )
-      {
-        opt.include_wallpaper = true;
-        opt.wallpaper_file = WALLPAPER_FILE;
-        opt.wallpaper_anchor = def.background.anchor;
-        r.wallpaper_installed = true;
-      }
-      else
-      {
-        doki::msg_log("  wallpaper not found, skipping: %s\n", src.c_str());
-      }
+      opt.include_wallpaper = true;
+      opt.wallpaper_file = WALLPAPER_FILE;
+      opt.wallpaper_anchor = def.background.anchor;
+      r.wallpaper_installed = true;
+      r.wallpaper_file = WALLPAPER_FILE;
+    }
+    else
+    {
+      doki::msg_log("  wallpaper not available, skipping: %s\n",
+                    def.background.name.c_str());
     }
   }
 

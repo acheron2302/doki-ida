@@ -6,6 +6,8 @@
 //    take effect on the next IDA launch (CSS is loaded at startup).
 //  * register a live navigation-band colorizer (Phase 8)  -> takes effect
 //    immediately, painting the nav band with the doki gradient.
+//  * update the Qt sticker overlay                        -> takes effect
+//    immediately, painting the character artwork on top of the active view.
 //
 // The colorizer is always restored on teardown so unloading the plugin never
 // leaves IDA in a broken state.
@@ -34,11 +36,20 @@ public:
 
   // Install (Phase 6) + activate + apply live nav colors. Returns false on
   // install failure. 'activate' writes the registry ThemeName;
-  // 'with_sticker' controls whether the sticker is installed.
+  // 'with_sticker' controls whether the sticker is installed;
+  // 'with_wallpaper' controls whether the full-listing wallpaper is
+  // installed (and emitted in the generated CSS).
   bool apply(const DokiThemeDefinition &def,
              bool activate = true,
              bool with_sticker = true,
              bool with_wallpaper = true);
+
+  // Live-only path used by auto-restore on plugin init. Re-applies the
+  // nav colorizer and the sticker overlay without writing the theme
+  // folder or fetching assets from the network. Safe to call before the
+  // GUI is fully realized.
+  void apply_live_only(const DokiThemeDefinition &def,
+                       bool with_sticker = true);
 
   // Restore the previous nav colorizer (idempotent). Called from the plugin
   // destructor.

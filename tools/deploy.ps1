@@ -1,15 +1,17 @@
 # Build (optional) + deploy the plugin and its assets for local testing.
 #
-#   tools\deploy.ps1                          # deploy DLL + assets + definitions
+#   tools\deploy.ps1                          # deploy DLL + definitions
 #   tools\deploy.ps1 -Build                   # cmake --build first
 #   tools\deploy.ps1 -DeployToIdaSdkPlugins   # also copy DLL to $env:IDASDK\plugins
 #
 # Stages:
 #   <IDADIR>\plugins\doki_theme.dll
 #   $IDAUSR\doki-theme\definitions\*.json
-#   $IDAUSR\doki-theme\assets\stickers\*.png
-#   $IDAUSR\doki-theme\assets\wallpapers\*.png
 #   [$env:IDASDK\plugins\doki_theme.dll] (only with -DeployToIdaSdkPlugins)
+#
+# Sticker and wallpaper assets are downloaded on demand from the
+# doki-theme CDN (see src/doki/assets.cpp) and cached under
+# $IDAUSR\doki-theme\cache\. No image files are bundled with the plugin.
 param([switch]$Build, [switch]$DeployToIdaSdkPlugins)
 
 $ErrorActionPreference = "Stop"
@@ -41,12 +43,7 @@ if ($DeployToIdaSdkPlugins) {
 
 $root = Join-Path $idausr "doki-theme"
 $defs = Join-Path $root "definitions"
-$stk  = Join-Path $root "assets\stickers"
-$wall = Join-Path $root "assets\wallpapers"
-New-Item -ItemType Directory -Force $defs, $stk, $wall | Out-Null
+New-Item -ItemType Directory -Force $defs | Out-Null
 Copy-Item (Join-Path $repoRoot "definitions\*.json") $defs -Force
-Copy-Item (Join-Path $repoRoot "assets\stickers\*.png") $stk -Force
-if (Test-Path (Join-Path $repoRoot "assets\wallpapers")) {
-  Copy-Item (Join-Path $repoRoot "assets\wallpapers\*.png") $wall -Force
-}
-Write-Output "deployed definitions + assets -> $root"
+Write-Output "deployed definitions -> $defs"
+Write-Output "sticker/wallpaper assets will be fetched from the doki-theme CDN on first use."

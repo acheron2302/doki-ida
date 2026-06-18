@@ -18,17 +18,11 @@ namespace doki
 
 struct CssOptions
 {
-  // Emit a sticker as a fixed background-image on the listing. Off by default:
-  // the translucent sticker is drawn by the Qt overlay (Phase 7); CSS has no
-  // per-image opacity. Kept for environments without live Qt.
-  bool include_sticker = false;
-  std::string sticker_file;    // file name resolved via $RELPATH (theme folder)
-  std::string sticker_anchor;  // "center" | "right" | "left" | ...
-
-  // Optional full-listing wallpaper, painted on IDAViewHost behind everything.
-  // When set, the sticker is layered on top (transparent memo background).
-  // The same wallpaper is also painted on the Hex-Rays pseudocode text_area_t
-  // so both disassembly and decompiler views share the background.
+  // Optional full-listing wallpaper, painted on CustomIDAMemo. When set, the
+  // listing line background is forced transparent and the pseudocode text
+  // area is also transparent so the wallpaper shows through both views.
+  // The wallpaper is the upstream Doki PNG; the per-pixel alpha baked into
+  // that file is the only transparency in play (no CSS opacity, no Qt layer).
   bool include_wallpaper = false;
   std::string wallpaper_file;  // file name resolved via $RELPATH (theme folder)
   std::string wallpaper_anchor; // "center" | "right" | "left" | "top" | "bottom"

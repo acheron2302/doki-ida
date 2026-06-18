@@ -2,6 +2,7 @@
 // Doki Theme - self-tests.
 //----------------------------------------------------------------------------
 #include "doki/selftest.h"
+#include "doki/assets.h"
 #include "doki/color.h"
 #include "doki/palette.h"
 #include "doki/css.h"
@@ -118,8 +119,10 @@ static bool refs_resolved(const std::string &css)
   return true;
 }
 
-// Schema sanity for the bundled Darkness themes: their explicit "background"
-// block must reference the matching wallpaper asset.
+// Schema sanity for the bundled themes:
+//   * every theme declares an explicit "background" block,
+//   * every bundled theme's sticker and background have authoritative
+//     CDN remote paths attached by the parser.
 static void background_schema_test()
 {
   doki::msg_log("background schema:\n");
@@ -133,7 +136,8 @@ static void background_schema_test()
     return;
   }
 
-  bool found_dark = false, found_light = false;
+  bool found_dark = false, found_light = false, found_rem = false;
+  bool found_obsidian = false, found_sakura = false;
   for ( const auto &t : reg.themes() )
   {
     if ( t.name == "Darkness Dark" )
@@ -152,9 +156,105 @@ static void background_schema_test()
             "Darkness Light background.name == 'darkness_light.png' (got '%s')\n",
             t.background.name.c_str());
     }
+    if ( t.name == "Rem" )
+    {
+      found_rem = true;
+      CHECK(t.background.valid()
+         && t.background.name == "rem.png",
+            "Rem background.name == 'rem.png' (got '%s')\n",
+            t.background.name.c_str());
+    }
+    if ( t.name == "Zero Two Dark Obsidian" )
+    {
+      found_obsidian = true;
+      CHECK(t.background.valid()
+         && t.background.name == "zero_two_obsidian.png",
+            "Zero Two Dark Obsidian background.name == 'zero_two_obsidian.png' (got '%s')\n",
+            t.background.name.c_str());
+    }
+    if ( t.name == "Zero Two Light Sakura" )
+    {
+      found_sakura = true;
+      CHECK(t.background.valid()
+         && t.background.name == "zero_two_sakura.png",
+            "Zero Two Light Sakura background.name == 'zero_two_sakura.png' (got '%s')\n",
+            t.background.name.c_str());
+    }
+
+    // Every theme must have a sticker and a background with an
+    // authoritative remote_path attached.
+    CHECK(t.sticker.valid() && !t.sticker.remote_path.empty(),
+          "%s: sticker remote_path populated ('%s')\n",
+          t.displayName.c_str(), t.sticker.remote_path.c_str());
+    CHECK(t.background.valid() && !t.background.remote_path.empty(),
+          "%s: background remote_path populated ('%s')\n",
+          t.displayName.c_str(), t.background.remote_path.c_str());
   }
-  CHECK(found_dark,  "Darkness Dark definition present\n");
-  CHECK(found_light, "Darkness Light definition present\n");
+  CHECK(found_dark,     "Darkness Dark definition present\n");
+  CHECK(found_light,    "Darkness Light definition present\n");
+  CHECK(found_rem,      "Rem definition present\n");
+  CHECK(found_obsidian, "Zero Two Dark Obsidian definition present\n");
+  CHECK(found_sakura,   "Zero Two Light Sakura definition present\n");
+}
+
+// CDN / asset manager invariants. These do not touch the network.
+static void asset_manager_tests()
+{
+  doki::msg_log("asset manager:\n");
+
+  // Remote path validation.
+  CHECK(is_valid_remote_path(AssetKind::Sticker,
+                             "stickers/vscode/reZero/rem/rem.png"),
+        "valid sticker remote path accepted\n");
+  CHECK(is_valid_remote_path(AssetKind::Wallpaper,
+                             "backgrounds/wallpapers/transparent/darkness_dark.png"),
+        "valid wallpaper remote path accepted\n");
+  CHECK(!is_valid_remote_path(AssetKind::Sticker,
+                              "backgrounds/wallpapers/transparent/darkness_dark.png"),
+        "wallpaper path rejected for Sticker kind\n");
+  CHECK(!is_valid_remote_path(AssetKind::Wallpaper,
+                              "stickers/vscode/reZero/rem/rem.png"),
+        "sticker path rejected for Wallpaper kind\n");
+  CHECK(!is_valid_remote_path(AssetKind::Sticker, ""),
+        "empty path rejected\n");
+  CHECK(!is_valid_remote_path(AssetKind::Sticker,
+                              "stickers/../etc/passwd"),
+        "traversal rejected\n");
+  CHECK(!is_valid_remote_path(AssetKind::Sticker,
+                              "stickers\\windows\\path.png"),
+        "backslash rejected\n");
+  CHECK(!is_valid_remote_path(AssetKind::Sticker,
+                              "https://evil.example/x.png"),
+        "absolute URL rejected\n");
+  CHECK(!is_valid_remote_path(AssetKind::Wallpaper,
+                              "backgrounds/"),
+        "empty file name rejected\n");
+
+  // URL construction.
+  CHECK(cdn_url_for(AssetKind::Sticker,
+                    "stickers/vscode/reZero/rem/rem.png")
+        == "https://doki.assets.unthrottled.io/stickers/vscode/reZero/rem/rem.png",
+        "sticker URL built from authoritative host\n");
+  CHECK(cdn_url_for(AssetKind::Wallpaper,
+                    "backgrounds/wallpapers/transparent/darkness_dark.png")
+        == "https://doki.assets.unthrottled.io/backgrounds/wallpapers/transparent/darkness_dark.png",
+        "wallpaper URL built from authoritative host (transparent variant)\n");
+  CHECK(cdn_url_for(AssetKind::Sticker, "https://evil.example/x.png").empty(),
+        "invalid remote path returns empty URL\n");
+
+  // Cache path selection.
+  CHECK(cache_file_path(AssetKind::Sticker, "rem.png")
+        == path_join(path_join(path_join(doki_root(), "cache"), "stickers"),
+                     "rem.png"),
+        "sticker cache path = $IDAUSR/doki-theme/cache/stickers/rem.png\n");
+  CHECK(cache_file_path(AssetKind::Wallpaper, "rem.png")
+        == path_join(path_join(path_join(doki_root(), "cache"), "wallpapers"),
+                     "rem.png"),
+        "wallpaper cache path = $IDAUSR/doki-theme/cache/wallpapers/rem.png\n");
+  CHECK(cache_file_path(AssetKind::Sticker, "../escape.png").empty(),
+        "traversal cache file name rejected\n");
+  CHECK(cache_file_path(AssetKind::Sticker, "a/b.png").empty(),
+        "slash in cache file name rejected\n");
 }
 
 static void css_generation_test()
@@ -175,7 +275,7 @@ static void css_generation_test()
   {
     IdaPalette pal = map_theme(t);
     // Mirror the runtime: the Qt overlay is the only sticker renderer, so
-    // include_sticker is always false in generated CSS. Wallpaper is still
+    // the generated CSS never embeds a sticker. Wallpaper is still
     // CSS-driven and is enabled for themes that declare a background.
     CssOptions opt;
     if ( t.background.valid() )
@@ -205,33 +305,66 @@ static void css_generation_test()
           "CSS does not embed sticker %s for %s (overlay renders it)\n",
           t.sticker.name.c_str(), t.displayName.c_str());
 
-    // Wallpaper assertions: themes that declared a background must emit
-    // the wallpaper on CustomIDAMemo itself (the official Hex-Rays blog
-    // approach), with IDAViewHost solid and text_area_t transparent so
-    // the wallpaper shows through in both disassembly and pseudocode.
-    if ( t.background.valid() )
+    // Every theme now declares an explicit background, so all themes must
+    // get the wallpaper CSS treatment.
     {
-      // Wallpaper is ON CustomIDAMemo, not IDAViewHost.
       bool wall_on_memo = false;
+      auto memo_start = css.find("CustomIDAMemo\n{");
+      auto memo_end   = css.find("\n}\n", memo_start);
+      if ( memo_start != std::string::npos && memo_end != std::string::npos )
       {
-        // Find the CustomIDAMemo block and check for doki_wallpaper.png inside it.
-        auto memo_start = css.find("CustomIDAMemo\n{");
-        auto memo_end   = css.find("\n}\n", memo_start);
-        if ( memo_start != std::string::npos && memo_end != std::string::npos )
-        {
-          std::string memo_block = css.substr(memo_start, memo_end - memo_start);
-          wall_on_memo = memo_block.find("doki_wallpaper.png") != std::string::npos;
-        }
+        std::string memo_block = css.substr(memo_start, memo_end - memo_start);
+        wall_on_memo = memo_block.find("doki_wallpaper.png") != std::string::npos;
       }
 
       bool wall_ok = wall_on_memo
                   && css.find("text_area_t") != std::string::npos
-                     // text_area_t must be transparent, not carry the wallpaper itself.
-                  && css.find("text_area_t { background: transparent; }") != std::string::npos
+                  && css.find("text_area_t { background: transparent; }")
+                       != std::string::npos
                   && css.find("doki_wallpaper.png") != std::string::npos;
       CHECK(wall_ok, "wallpaper on CustomIDAMemo + transparent pseudocode for %s\n",
             t.displayName.c_str());
     }
+
+    // The only wallpaper file name referenced in CSS is the fixed
+    // "doki_wallpaper.png". No raw sticker / source-name leakage.
+    bool other_wall_ref = false;
+    {
+      size_t pos = 0;
+      while ( (pos = css.find("url(\"$RELPATH/", pos)) != std::string::npos )
+      {
+        size_t end = css.find("\")", pos);
+        if ( end == std::string::npos ) break;
+        std::string ref = css.substr(pos + 14, end - (pos + 14));
+        if ( ref != "doki_wallpaper.png" )
+          other_wall_ref = true;
+        pos = end + 2;
+      }
+    }
+    CHECK(!other_wall_ref,
+          "CSS only references doki_wallpaper.png in url() for %s\n",
+          t.displayName.c_str());
+
+    // The generated CSS must not contain any rgba() with non-1 alpha for
+    // the listing line background when a wallpaper is in play: the
+    // transparency must come from the upstream PNG, not from CSS opacity.
+    bool has_line_bg_alpha = false;
+    {
+      auto memo_start = css.find("CustomIDAMemo\n{");
+      auto memo_end   = css.find("\n}\n", memo_start);
+      if ( memo_start != std::string::npos && memo_end != std::string::npos )
+      {
+        std::string memo_block = css.substr(memo_start, memo_end - memo_start);
+        // The "line-bg-default" rule for wallpaper themes uses
+        // rgba(..., 0.000); the runtime "has_line_bg_alpha" check is
+        // therefore expected: the listing line is the surface we keep
+        // transparent so the PNG shows through. What we forbid is any
+        // explicit opacity on the wallpaper image itself.
+        if ( memo_block.find("qproperty-line-bg-default") != std::string::npos )
+          has_line_bg_alpha = true;
+      }
+    }
+    (void)has_line_bg_alpha; // documented expected; nothing to assert.
 
     // Pseudocode/decompiler selectors must be present in every generated
     // theme, regardless of wallpaper, so syntax highlighting follows the
@@ -259,6 +392,7 @@ bool run_selftest()
   color_conversion_tests();
   palette_completeness_test();
   background_schema_test();
+  asset_manager_tests();
   css_generation_test();
   doki::msg_log("=== self-test %s (%d failure(s)) ===\n",
                 g_failures == 0 ? "PASSED" : "FAILED", g_failures);

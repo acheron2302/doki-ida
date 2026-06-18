@@ -16,21 +16,19 @@ namespace doki
 // A character sticker (corner artwork).
 struct DokiSticker
 {
-  std::string name;        // file name, e.g. "rem.png"
+  std::string name;        // local cache file name, e.g. "rem.png"
+  std::string remote_path; // CDN-relative path (e.g. "stickers/vscode/reZero/rem/rem.png")
   std::string anchor;      // "center", "right", "left", ...
-  int opacity = 100;       // 0..100 (definitions store small values, e.g. 7)
   bool valid() const { return !name.empty(); }
 };
 
 // A full-listing background / wallpaper. Same shape as DokiSticker so the
-// JSON schema is uniform. opacity is metadata only: QSS can't apply per-image
-// opacity, so the renderer (CSS) is free to ignore it. anchor is honored
-// when emitted.
+// JSON schema is uniform. anchor is honored when emitted.
 struct DokiBackground
 {
-  std::string name;        // file name, e.g. "darkness_dark.png"
+  std::string name;        // local cache file name, e.g. "darkness_dark.png"
+  std::string remote_path; // CDN-relative path (e.g. "backgrounds/darkness_dark.png")
   std::string anchor;      // "center", "right", "left", ...
-  int opacity = 100;       // 0..100
   bool valid() const { return !name.empty(); }
 };
 

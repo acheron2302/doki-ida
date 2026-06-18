@@ -50,8 +50,11 @@ struct doki_plugin_t : public plugmod_t, public doki::IDokiActions
       const doki::DokiThemeDefinition *t = m_registry.get(m_cfg.selected_id);
       if ( t != nullptr )
       {
-        m_applier.apply(*t, /*activate=*/true,
-                        m_cfg.sticker_enabled, m_cfg.wallpaper_enabled);
+        // Auto-restore: set up the live nav colorizer and sticker overlay
+        // for the already-activated theme without touching the install
+        // pipeline (no network fetch on plugin init). The generated CSS
+        // theme stays active from the previous session.
+        m_applier.apply_live_only(*t, m_cfg.sticker_enabled);
         doki::msg_log("restored last character: %s\n", t->displayName.c_str());
       }
     }
@@ -92,7 +95,12 @@ struct doki_plugin_t : public plugmod_t, public doki::IDokiActions
   {
     m_cfg.sticker_enabled = !m_cfg.sticker_enabled;
     doki::save_config(m_cfg);
-    reapply_current();
+    if ( !reapply_current() )
+    {
+      doki::msg_log("sticker toggle ignored: no Doki theme has been "
+                    "applied yet (open the picker first).\n");
+    }
+    doki::sync_action_checked("doki:toggle_sticker", m_cfg.sticker_enabled);
     doki::msg_log("sticker %s\n", m_cfg.sticker_enabled ? "enabled" : "disabled");
   }
 
@@ -100,9 +108,18 @@ struct doki_plugin_t : public plugmod_t, public doki::IDokiActions
   {
     m_cfg.wallpaper_enabled = !m_cfg.wallpaper_enabled;
     doki::save_config(m_cfg);
-    reapply_current();
+    if ( !reapply_current() )
+    {
+      doki::msg_log("wallpaper toggle ignored: no Doki theme has been "
+                    "applied yet (open the picker first).\n");
+    }
+    doki::sync_action_checked("doki:toggle_wallpaper", m_cfg.wallpaper_enabled);
     doki::msg_log("wallpaper %s\n", m_cfg.wallpaper_enabled ? "enabled" : "disabled");
   }
+
+  //--- IDokiActions state accessors (for menu checkmarks) --------------------
+  virtual bool is_sticker_enabled() override               { return m_cfg.sticker_enabled; }
+  virtual bool is_wallpaper_enabled() override             { return m_cfg.wallpaper_enabled; }
 
   virtual void restore_default() override
   {
@@ -134,19 +151,45 @@ private:
       return;
     m_current = i;
     const doki::DokiThemeDefinition &t = m_registry.themes()[i];
-    m_applier.apply(t, /*activate=*/true,
-                    m_cfg.sticker_enabled, m_cfg.wallpaper_enabled);
+    m_applier.apply(t,
+                    /*activate=*/true,
+                    m_cfg.sticker_enabled,
+                    m_cfg.wallpaper_enabled);
     m_cfg.selected_id = t.id;
+    m_last_applied_id = t.id;
     doki::save_config(m_cfg);
   }
 
-  // Re-apply the currently selected theme (used by the sticker/wallpaper toggles).
-  void reapply_current()
+  // Re-apply the currently selected theme (used by the toggles).
+  // If selected_id is empty (e.g. after restore_default), fall back to the
+  // last successfully applied theme so toggles still take effect.
+  // Returns false (and logs once) when no theme can be resolved, so callers
+  // can show a user-friendly message instead of silently doing nothing.
+  bool reapply_current()
   {
     const doki::DokiThemeDefinition *t = m_registry.get(m_cfg.selected_id);
-    if ( t != nullptr )
-      m_applier.apply(*t, /*activate=*/true,
-                      m_cfg.sticker_enabled, m_cfg.wallpaper_enabled);
+    if ( t == nullptr && !m_last_applied_id.empty() )
+      t = m_registry.get(m_last_applied_id);
+    if ( t == nullptr )
+    {
+      static bool s_warned = false;
+      if ( !s_warned )
+      {
+        doki::msg_log("  no Doki theme selected; toggle had no visible "
+                      "effect. Use Edit > Plugins > Doki Theme to pick a "
+                      "character first.\n");
+        s_warned = true;
+      }
+      return false;
+    }
+    // Toggles do not change the active IDA theme; they only re-install the
+    // assets and refresh the live nav colorizer.
+    m_applier.apply(*t,
+                    /*activate=*/false,
+                    m_cfg.sticker_enabled,
+                    m_cfg.wallpaper_enabled);
+    m_last_applied_id = t->id;
+    return true;
   }
 
   bool install_all()
@@ -162,6 +205,10 @@ private:
   doki::DokiConfig    m_cfg;
   size_t              m_current = 0;
   uint32              m_rng = 0x9e3779b9u;
+  // Last successfully applied theme id. Survives restore_default() (which clears
+  // selected_id) so toggles like the sticker / wallpaper still have a theme
+  // to reapply against after a restore.
+  std::string         m_last_applied_id;
 };
 
 //----------------------------------------------------------------------------

@@ -32,14 +32,15 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
 {
   std::ostringstream o;
   const char *base = pal.dark ? "dark" : "default";
-  // Sticker is rendered by the Qt overlay (DokiOverlayManager) on top of the
-  // view, not by CSS. The CSS therefore never paints a sticker. Wallpaper is
-  // still CSS-driven.
-  const bool stick = false; // legacy: opt.include_sticker retained for API;
-                            // overlay is the only sticker renderer.
-  const bool wall  = opt.include_wallpaper && !opt.wallpaper_file.empty();
-  // Any image behind the listing requires transparent line/widget backgrounds.
-  const bool transparent_bg = stick || wall;
+  // The sticker is rendered by the Qt overlay (DokiOverlayManager) on top of
+  // the view, not by CSS. Wallpaper (if any) is CSS-driven: it is applied
+  // directly on CustomIDAMemo per the official Hex-Rays blog approach, and
+  // its transparency comes from the per-pixel alpha baked into the
+  // upstream Doki PNG. There is no CSS opacity and no Qt wallpaper layer.
+  const bool wall = opt.include_wallpaper && !opt.wallpaper_file.empty();
+  // When an image sits behind the listing, the per-line background must be
+  // transparent so the image shows through.
+  const bool transparent_bg = wall;
 
   o << "/* doki-theme: " << def.displayName
     << " (" << def.group << ") - generated, do not edit by hand */\n";

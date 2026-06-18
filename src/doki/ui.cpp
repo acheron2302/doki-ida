@@ -115,36 +115,56 @@ struct restore_handler_t : public base_handler_t
   { if ( g_actions ) g_actions->restore_default(); return 1; }
 };
 
-static pick_handler_t      g_pick;
-static random_handler_t    g_random;
-static next_handler_t      g_next;
-static sticker_handler_t   g_sticker;
-static wallpaper_handler_t g_wall;
-static restore_handler_t   g_restore;
+static pick_handler_t        g_pick;
+static random_handler_t      g_random;
+static next_handler_t        g_next;
+static sticker_handler_t     g_sticker;
+static wallpaper_handler_t   g_wall;
+static restore_handler_t     g_restore;
 
-struct act_def_t { const char *name; const char *label; action_handler_t *h; };
+struct act_def_t
+{
+  const char *name;
+  const char *label;
+  action_handler_t *h;
+  bool checkable;  // true => register with ADF_CHECKABLE + sync initial state
+};
 static const act_def_t g_defs[] =
 {
-  { DOKI_ACT_PICK,    "Doki Theme: Pick character...", &g_pick    },
-  { DOKI_ACT_RANDOM,  "Doki Theme: Random character",  &g_random  },
-  { DOKI_ACT_NEXT,    "Doki Theme: Next character",    &g_next    },
-  { DOKI_ACT_STICKER, "Doki Theme: Toggle sticker",    &g_sticker },
-  { DOKI_ACT_WALL,    "Doki Theme: Toggle wallpaper",  &g_wall    },
-  { DOKI_ACT_RESTORE, "Doki Theme: Restore default",   &g_restore },
+  { DOKI_ACT_PICK,    "Doki Theme: Pick character...",       &g_pick,    false },
+  { DOKI_ACT_RANDOM,  "Doki Theme: Random character",        &g_random,  false },
+  { DOKI_ACT_NEXT,    "Doki Theme: Next character",          &g_next,    false },
+  { DOKI_ACT_STICKER, "Doki Theme: Toggle sticker",          &g_sticker, true  },
+  { DOKI_ACT_WALL,    "Doki Theme: Toggle wallpaper",        &g_wall,    true  },
+  { DOKI_ACT_RESTORE, "Doki Theme: Restore default",         &g_restore, false },
 };
+
+static bool initial_checked_for(const char *name)
+{
+  if ( g_actions == nullptr )
+    return false;
+  if ( !strcmp(name, DOKI_ACT_STICKER) ) return g_actions->is_sticker_enabled();
+  if ( !strcmp(name, DOKI_ACT_WALL)    ) return g_actions->is_wallpaper_enabled();
+  return false;
+}
 
 void register_actions(IDokiActions *actions, void *plugmod_owner)
 {
   g_actions = actions;
   for ( const auto &d : g_defs )
   {
-    action_desc_t desc = ACTION_DESC_LITERAL_PLUGMOD(
+    int flags = ADF_OT_PLUGMOD | (d.checkable ? ADF_CHECKABLE : 0);
+    action_desc_t desc = ACTION_DESC_LITERAL_OWNER(
         d.name, d.label, d.h, (plugmod_t *)plugmod_owner,
-        nullptr, nullptr, -1);
+        nullptr, nullptr, -1, flags);
     if ( !register_action(desc) )
       doki::msg_log("failed to register action %s\n", d.name);
     else
+    {
       attach_action_to_menu("Options/", d.name, SETMENU_APP);
+      if ( d.checkable )
+        update_action_checked(d.name, initial_checked_for(d.name));
+    }
   }
   doki::msg_log("menu actions registered under Options.\n");
 }
@@ -157,6 +177,11 @@ void unregister_actions()
     unregister_action(d.name);
   }
   g_actions = nullptr;
+}
+
+void sync_action_checked(const char *name, bool checked)
+{
+  update_action_checked(name, checked);
 }
 
 } // namespace doki

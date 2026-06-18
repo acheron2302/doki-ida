@@ -12,6 +12,10 @@
       "opacity": 7
     }
   },
+  "background": {
+    "name": "rem.png",
+    "anchor": "center"
+  },
   "overrides": {
     "editorScheme": {
       "colors": {

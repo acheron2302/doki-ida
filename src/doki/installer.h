@@ -19,6 +19,7 @@ struct InstallResult
   std::string css_path;     // full path to the written theme.css
   bool sticker_installed = false;
   bool wallpaper_installed = false;
+  std::string wallpaper_file; // installed wallpaper file name (or empty)
   std::string err;
 };
 
