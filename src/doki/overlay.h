@@ -118,6 +118,10 @@ private:
   std::string m_current_theme_name;  // for diagnostics
   std::string m_current_sticker_file; // for diagnostics
 
+  // The overlay is a QWidget child of the active IDA view while attached, so
+  // Qt may delete it if that parent is destroyed first. QPointer lets us see
+  // that deletion. shutdown() still explicitly deletes the widget if it is
+  // alive, avoiding the original leak without double-owning a QObject.
   QPointer<DokiStickerOverlayWidget> m_overlay;
 };
 

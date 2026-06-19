@@ -35,6 +35,7 @@ std::string user_idadir()
 std::string doki_root()        { return path_join(user_idadir(), "doki-theme"); }
 std::string definitions_dir()  { return path_join(doki_root(), "definitions"); }
 std::string assets_dir()       { return path_join(doki_root(), "assets"); }
+std::string catalog_path()     { return path_join(doki_root(), "theme_catalog.json"); }
 std::string themes_dir()       { return path_join(user_idadir(), "themes"); }
 
 bool ensure_dir(const std::string &dir)

@@ -9,11 +9,44 @@
 #include <ida.hpp>
 #include <kernwin.hpp>
 
+#include <cctype>
+
 namespace doki
 {
 
 ThemeApplier::ThemeApplier()  = default;
 ThemeApplier::~ThemeApplier() = default;
+
+// Sticker anchor policy: pinned to the bottom-right corner regardless of what
+// the theme's JSON says. The upstream Doki definitions still carry
+// per-character anchors ("center" for Echidna, "right" for most others)
+// inherited from their CSS-only days, but the IDA overlay uses a single
+// placement -- the bottom-right corner of the active view. "bottom" maps to
+// the bottom-right in overlay.cpp's compute_dest_rect.
+constexpr const char *kOverlayStickerAnchor = "bottom";
+
+// Diagnostic helper: classify the raw anchor from the theme definition so
+// the apply logs make it clear that we deliberately override the theme's
+// value. Returns the recognized anchor name in lower case (or "empty" /
+// "unrecognized") for logging only; the actual value passed to the overlay
+// is always kOverlayStickerAnchor.
+static const char *classify_anchor_for_log(const std::string &raw_anchor)
+{
+  if ( raw_anchor.empty() )
+    return "empty";
+  std::string lowered;
+  lowered.reserve(raw_anchor.size());
+  for ( char c : raw_anchor )
+    lowered.push_back(static_cast<char>(std::tolower(
+        static_cast<unsigned char>(c))));
+  static const char *kAccepted[] = {
+      "center", "left", "right", "top", "bottom"
+  };
+  for ( const char *a : kAccepted )
+    if ( lowered == a )
+      return a;
+  return "unrecognized";
+}
 
 // C-style trampoline matching nav_colorizer_t; forwards to the applier.
 static uint32 idaapi doki_nav_colorizer(ea_t ea, asize_t nbytes, void *ud)
@@ -85,15 +118,16 @@ bool ThemeApplier::apply(const DokiThemeDefinition &def, bool activate,
   ensure_overlay_manager();
   if ( m_overlay )
   {
-    // Anchor: pinned to bottom-right by request, regardless of what the
-    // theme's JSON says (most Doki definitions still carry an old "right"
-    // anchor from their CSS-only days). Switch the literal here to
-    // "left" / "right" / "top" / "center" / "bottom" as needed.
-    static const char *kOverlayAnchor = "bottom";
+    // The overlay is pinned to the bottom-right corner of the active view
+    // regardless of what the theme's JSON says. The raw anchor from the
+    // definition is logged for diagnostics only.
+    doki::msg_log("  apply: sticker anchor='%s' (forced='%s')\n",
+                  classify_anchor_for_log(def.sticker.anchor),
+                  kOverlayStickerAnchor);
 
     m_overlay->update(res.theme_name,
                       def.sticker.name,
-                      kOverlayAnchor,
+                      kOverlayStickerAnchor,
                       with_sticker,
                       res.sticker_installed);
   }
@@ -129,10 +163,13 @@ void ThemeApplier::apply_live_only(const DokiThemeDefinition &def,
   ensure_overlay_manager();
   if ( m_overlay )
   {
-    static const char *kOverlayAnchor = "bottom";
+    // Same bottom-right pinning as apply(). See kOverlayStickerAnchor.
+    doki::msg_log("  apply_live: sticker anchor='%s' (forced='%s')\n",
+                  classify_anchor_for_log(def.sticker.anchor),
+                  kOverlayStickerAnchor);
     m_overlay->update(theme_name_for(def),
                       def.sticker.name,
-                      kOverlayAnchor,
+                      kOverlayStickerAnchor,
                       with_sticker,
                       /*sticker_installed=*/true);
   }

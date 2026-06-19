@@ -18,6 +18,10 @@ std::string doki_root();
 // <IDAUSR>/doki-theme/definitions  -- bundled theme definitions.
 std::string definitions_dir();
 
+// <IDAUSR>/doki-theme/theme_catalog.json  -- generated catalog of all
+// official doki themes. This is the runtime source of truth.
+std::string catalog_path();
+
 // <IDAUSR>/doki-theme/assets  -- bundled stickers/backgrounds.
 std::string assets_dir();
 

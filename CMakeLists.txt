@@ -52,7 +52,7 @@ endif()
 
 # Explicit early find_package so we can override imported target properties
 # (IDA Qt import libs) before ida_add_plugin appends Qt6::* to the link list.
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
 # Override Qt6::{Core,Gui,Widgets} import libs with the IDA SDK's QT_NAMESPACE=QT
 # Qt import libraries (idasdk/src/lib/x64_win_qt). Linking against a public Qt
@@ -86,9 +86,88 @@ if(WIN32)
     endif()
 endif()
 
+# ---------------------------------------------------------------------------
+# libcurl (statically linked into the plugin).
+#
+# The runtime CDN fetch uses libcurl, loaded statically through CMake
+# FetchContent. This decouples HTTPS downloads from the Qt Network stack
+# and from the Qt SSL/OpenSSL runtime libraries.
+#
+# - DOKI_USE_EMBEDDED_CURL=ON (default): Fetch libcurl 8.7.1, build it
+#     statically, link it into doki_theme.dll. The plugin no longer needs
+#     a separate libcurl deployment.
+# - DOKI_USE_EMBEDDED_CURL=OFF: Skip FetchContent. The runtime falls
+#     back to dynamic libcurl loading via QLibrary, so the user can
+#     still ship a libcurl runtime DLL if they prefer.
+# ---------------------------------------------------------------------------
+option(DOKI_USE_EMBEDDED_CURL "Statically link libcurl into the plugin" ON)
+set(DOKI_HAS_EMBEDDED_CURL 0)
+if(DOKI_USE_EMBEDDED_CURL)
+    include(FetchContent)
+    set(FETCHCONTENT_QUIET FALSE)
+
+    set(DOKI_LIBCURL_VERSION "8.7.1")
+    set(DOKI_LIBCURL_URL
+        "https://github.com/curl/curl/releases/download/curl-${DOKI_LIBCURL_VERSION//./_}/curl-${DOKI_LIBCURL_VERSION}.tar.xz"
+        "https://curl.se/download/curl-${DOKI_LIBCURL_VERSION}.tar.xz")
+
+    FetchContent_Declare(
+        doki_libcurl
+        URL         ${DOKI_LIBCURL_URL}
+        URL_HASH    SHA256=6fea2aac6a4610fbd0400afb0bcddbe7258a64c63f1f68e5855ebc0c659710cd
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+
+    # Configure the libcurl build before fetching so that the subproject
+    # honors our static + Schannel settings without prompting.
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(BUILD_STATIC_LIBS ON  CACHE BOOL "" FORCE)
+    set(BUILD_CURL_EXE    OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING     OFF CACHE BOOL "" FORCE)
+    set(BUILD_LIBCURL_DOCS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_CURL_MANUAL OFF CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_INSTALL ON CACHE BOOL "" FORCE)
+    set(CURL_WERROR         OFF CACHE BOOL "" FORCE)
+    set(PICKY_COMPILER      OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBIDN2    OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBPSL     OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBSSH     OFF CACHE BOOL "" FORCE)
+    set(CURL_USE_LIBSSH2    OFF CACHE BOOL "" FORCE)
+    set(USE_LIBIDN2         OFF CACHE BOOL "" FORCE)
+    set(USE_MANUAL          OFF CACHE BOOL "" FORCE)
+    set(USE_NGHTTP2         OFF CACHE BOOL "" FORCE)
+    set(CURL_BROTLI         OFF CACHE BOOL "" FORCE)
+    set(CURL_ZSTD           OFF CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_LDAP   ON  CACHE BOOL "" FORCE)
+    set(CURL_DISABLE_LDAPS  ON  CACHE BOOL "" FORCE)
+    if(WIN32)
+        set(CURL_USE_SCHANNEL    ON  CACHE BOOL "" FORCE)
+        set(CURL_USE_OPENSSL     OFF CACHE BOOL "" FORCE)
+        set(CURL_USE_MBEDTLS     OFF CACHE BOOL "" FORCE)
+        set(CURL_USE_BEARSSL     OFF CACHE BOOL "" FORCE)
+        set(CURL_USE_WOLFSSL     OFF CACHE BOOL "" FORCE)
+    else()
+        set(CURL_USE_OPENSSL     ON  CACHE BOOL "" FORCE)
+    endif()
+
+    FetchContent_MakeAvailable(doki_libcurl)
+
+    # libcurl is a C project; force-disable its PIC requirement so it can
+    # link cleanly into our IDA plugin DLL on MSVC (no PIC on x64).
+    set_target_properties(libcurl_static PROPERTIES POSITION_INDEPENDENT_CODE OFF)
+
+    set(DOKI_HAS_EMBEDDED_CURL 1)
+endif()
+
+# Ensure src/doki/assets.cpp sees DOKI_HAS_EMBEDDED_CURL as 0/1, not a
+# generator expression that has not been resolved at the TU level.
+set(DOKI_HAS_EMBEDDED_CURL_INT 0)
+if(DOKI_USE_EMBEDDED_CURL)
+    set(DOKI_HAS_EMBEDDED_CURL_INT 1)
+endif()
+
 ida_add_plugin(doki_theme
     TYPE QT
-    QT_COMPONENTS Core Gui Widgets Network
+    QT_COMPONENTS Core Gui Widgets
     SOURCES
         ${DOKI_SOURCES}
     DEFINES
@@ -96,15 +175,35 @@ ida_add_plugin(doki_theme
         QT_CORE_LIB
         QT_DLL
         QT_GUI_LIB
-        QT_NETWORK_LIB
         QT_THREAD_SUPPORT
         QT_WIDGETS_LIB
+        DOKI_HAS_EMBEDDED_CURL=$<BOOL:${DOKI_USE_EMBEDDED_CURL}>
 )
 
 target_include_directories(doki_theme PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
+
+# Link libcurl (statically) when FetchContent is enabled. libcurl's static
+# target uses PRIVATE link libraries for the system deps (ws2_32, bcrypt,
+# crypt32 on Windows; pthread, dl, m on Linux), so we add them here too
+# to ensure they end up on the link line of the plugin DLL.
+if(DOKI_USE_EMBEDDED_CURL)
+    target_link_libraries(doki_theme PRIVATE CURL::libcurl)
+    if(WIN32)
+        target_link_libraries(doki_theme PRIVATE ws2_32 bcrypt crypt32)
+    else()
+        target_link_libraries(doki_theme PRIVATE pthread dl m)
+        if(APPLE)
+            target_link_libraries(doki_theme PRIVATE
+                "-framework Security"
+                "-framework CoreFoundation"
+                "-framework CoreServices"
+                "-framework SystemConfiguration")
+        endif()
+    endif()
+endif()
 
 target_compile_definitions(doki_theme PRIVATE
     DOKI_VERSION="${DOKI_VERSION}"
@@ -115,12 +214,39 @@ if(MSVC)
     target_compile_options(doki_theme PRIVATE /bigobj /utf-8)
 endif()
 
-# Packaging: stage DLL + definitions + assets into a distributable zip.
+# Regenerate the theme catalog from the snapshotted upstream
+# definitions. This is a manual step by design: it requires network
+# access (for the initial fetch_upstream.ps1) and is not run on every
+# `cmake --build`. Run `tools\fetch_upstream.ps1` first to update the
+# pinned snapshot, then `tools\generate_theme_catalog.ps1` (or the
+# `generate_catalog` target below) to refresh generated/theme_catalog.json.
 if(WIN32)
+    add_custom_target(generate_catalog
+        COMMAND powershell -ExecutionPolicy Bypass
+                -File "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_theme_catalog.ps1"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        COMMENT "Generating theme_catalog.json from upstream definitions")
+
+    add_custom_target(fetch_upstream
+        COMMAND powershell -ExecutionPolicy Bypass
+                -File "${CMAKE_CURRENT_SOURCE_DIR}/tools/fetch_upstream.ps1"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        COMMENT "Snapshotting doki-master-theme definitions into third_party/")
+
+    # Packaging: stage DLL + catalog + attribution into a distributable zip.
+    # By default this re-uses the committed generated/theme_catalog.json
+    # so a clean clone can package without first running fetch_upstream.
+    # To force regeneration, pass -DOKI_REGEN_CATALOG=ON or invoke
+    # `tools\package.ps1 -RegenerateCatalog` directly.
+    option(DOKI_REGEN_CATALOG "Regenerate theme_catalog.json during package" OFF)
+    set(_pkg_args "-Version" "${DOKI_VERSION}")
+    if(DOKI_REGEN_CATALOG)
+        list(APPEND _pkg_args "-RegenerateCatalog")
+    endif()
     add_custom_target(package
         COMMAND powershell -ExecutionPolicy Bypass
                 -File "${CMAKE_CURRENT_SOURCE_DIR}/tools/package.ps1"
-                -Version "${DOKI_VERSION}"
+                ${_pkg_args}
         DEPENDS doki_theme
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         COMMENT "Packaging doki-theme-ida v${DOKI_VERSION}")

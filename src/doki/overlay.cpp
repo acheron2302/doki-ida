@@ -49,7 +49,7 @@ Anchor parse_anchor(const std::string &s)
   if ( s == "right" )  return Anchor::Right;
   if ( s == "top" )    return Anchor::Top;
   if ( s == "bottom" ) return Anchor::Bottom;
-  return Anchor::Right; // default: corner mascot
+  return Anchor::Bottom; // default: bottom-right corner
 }
 
 // Compute the destination rect for the sticker inside `bounds` (the
@@ -278,34 +278,50 @@ DokiOverlayManager::DokiOverlayManager()
   if ( !is_idaq() || QApplication::instance() == nullptr )
     return;
 
-  // owner = this: the kernel will unhook the listener when the manager
-  // (and therefore the plugin module) is unloaded. HKCB_GLOBAL is not
-  // required: our lifetime matches the plugin lifetime.
-  hook_event_listener(HT_UI, this, (const void *)this);
-  m_hooked = true;
+  // Hook HT_UI so we can reattach when IDA changes the active viewer/widget.
+  // We explicitly unhook in shutdown() before destroying the overlay widget;
+  // relying only on event_listener_t::~event_listener_t() is too late during
+  // IDA close, because UI teardown notifications can otherwise race our
+  // widget destruction.
+  //
+  // owner=nullptr is intentional: the SDK docs say owner should be plugin_t,
+  // processor_t, or loader_t. This manager is none of those. Since this hook
+  // is never global and shutdown() always unhooks it, an explicit owner is not
+  // needed and passing `this` as the old code did gives IDA an invalid owner.
+  m_hooked = hook_event_listener(HT_UI, this, nullptr);
 }
 
 DokiOverlayManager::~DokiOverlayManager()
 {
   shutdown();
-  // event_listener_t unhooks itself in its dtor if still hooked; we keep
-  // m_hooked as a flag to avoid double-unhook in shutdown().
 }
 
 void DokiOverlayManager::shutdown()
 {
+  // Stop reacting to IDA UI events before touching Qt widgets. The base
+  // event_listener_t destructor would eventually remove this listener, but
+  // doing it explicitly here closes the race where IDA close emits HT_UI
+  // notifications while our overlay widget is being detached/destroyed.
+  m_enabled = false;
+  if ( m_hooked )
+  {
+    unhook_event_listener(HT_UI, this);
+    m_hooked = false;
+  }
+
+  // Drop the overlay widget after the HT_UI hook is gone. clear_target()
+  // detaches the event filter and reparents to nullptr; then delete destroys
+  // the widget. m_overlay is a QPointer, so if Qt already deleted the widget
+  // through its parent, this block is skipped.
   if ( m_overlay )
   {
     m_overlay->clear_target();
+    delete m_overlay;
     m_overlay = nullptr;
   }
-  m_enabled = false;
   m_current_pixmap_path.clear();
   m_current_theme_name.clear();
   m_current_sticker_file.clear();
-  // Listener unhook is handled by the IDA event_listener_t destructor when
-  // the manager object itself is destroyed. We don't call
-  // unhook_event_listener(HT_UI, this) here to avoid double-unhook.
 }
 
 void DokiOverlayManager::disable_overlay()

@@ -4,19 +4,28 @@
 // The plugin context owns the theme registry and the runtime applier, exposes
 // the menu actions (IDokiActions), and routes run().
 //----------------------------------------------------------------------------
-#include <ida.hpp>
-#include <idp.hpp>
-#include <loader.hpp>
-#include <kernwin.hpp>
-
+// nlohmann/json must be included BEFORE any IDA SDK header because the
+// SDK's pro.h #defines snprintf to dont_use_snprintf, which would break
+// nlohmann/json's serializer. theme.h pulls nlohmann/json in, so we
+// include our own headers first.
 #include "doki/log.h"
 #include "doki/registry.h"
+#include "doki/theme.h"
 #include "doki/paths.h"
 #include "doki/selftest.h"
 #include "doki/installer.h"
 #include "doki/apply.h"
 #include "doki/ui.h"
 #include "doki/config.h"
+
+#include <ida.hpp>
+#include <idp.hpp>
+#include <loader.hpp>
+#include <kernwin.hpp>
+#include <pro.h>
+#include <diskio.hpp>
+
+#include <vector>
 
 // Single definition of the verbose-logging flag declared in log.h.
 bool doki::g_verbose = false;
@@ -28,7 +37,60 @@ struct doki_plugin_t : public plugmod_t, public doki::IDokiActions
 {
   doki_plugin_t()
   {
-    m_registry.load_dir(doki::definitions_dir());
+    // Catalog is the official theme source. After it loads we layer in
+    // any user-supplied custom definitions dropped into
+    // $IDAUSR/doki-theme/definitions/; those override catalog entries
+    // with the same id (via ThemeRegistry::upsert).
+    size_t loaded = m_registry.load_catalog(doki::catalog_path());
+    if ( loaded == 0 )
+    {
+      // Offline / first-run fallback: legacy hand-maintained bundled
+      // definitions under $IDAUSR/doki-theme/definitions/ still work
+      // until the catalog has been deployed.
+      m_registry.load_dir(doki::definitions_dir());
+    }
+    else
+    {
+      // Optional custom override directory. We use upsert() so a custom
+      // definition with the same id as a catalog entry actually
+      // REPLACES the catalog entry in-place; the picker then shows
+      // exactly one theme for that id. New ids are appended.
+      std::string customDir = doki::definitions_dir();
+      if ( qisdir(customDir.c_str()) )
+      {
+        struct collector_t : public file_enumerator_t
+        {
+          std::vector<std::string> files;
+          int visit_file(const char *file) override
+          {
+            files.push_back(file);
+            return 0; // keep going
+          }
+        } collector;
+        char answer[QMAXPATH];
+        enumerate_files(answer, sizeof(answer), customDir.c_str(),
+                        "*.json", collector);
+        size_t replaced = 0, added = 0;
+        for ( const std::string &p : collector.files )
+        {
+          doki::DokiThemeDefinition def;
+          std::string err;
+          if ( doki::load_definition(p.c_str(), &def, &err) )
+          {
+            if ( m_registry.upsert(def) )
+              ++replaced;
+            else
+              ++added;
+          }
+          else
+            doki::msg_log("custom def skipped '%s': %s\n",
+                          p.c_str(), err.c_str());
+        }
+        if ( replaced || added )
+          doki::msg_log("custom defs: %u replaced, %u added\n",
+                        (uint)replaced, (uint)added);
+      }
+    }
     m_cfg = doki::load_config();
 
     // Capture the user's pre-doki theme once, so "Restore default" is faithful.
