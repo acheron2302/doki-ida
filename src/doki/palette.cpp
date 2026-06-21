@@ -34,6 +34,13 @@ static Rgba parse_or(const std::string &value, const Rgba &fallback)
   return parse_hex_color(value, &c) ? c : fallback;
 }
 
+static Rgba readable(Rgba fg, const Rgba &bg, bool dark, double ratio = 3.0)
+{
+  return ensure_contrast(fg, bg, ratio,
+                         dark ? ContrastPreference::Lighten
+                              : ContrastPreference::Darken);
+}
+
 IdaPalette map_theme(const DokiThemeDefinition &def)
 {
   IdaPalette p;
@@ -83,6 +90,12 @@ IdaPalette map_theme(const DokiThemeDefinition &def)
   p.line_number  = pick(def, {"lineNumberColor", "comments"}, def_mut);
   p.caret_row    = pick(def, {"caretRow", "highlightColor"}, p.secondary_bg);
   p.disabled     = pick(def, {"disabledColor", "comments"}, def_mut);
+  p.error        = readable(pick(def, {"errorColor"}, Rgba{0xff,0x5f,0x70,255}), p.base_bg, def.dark, 3.0);
+  p.warning      = readable(pick(def, {"warningColor", "constantColor"}, Rgba{0xff,0xc6,0x6d,255}), p.base_bg, def.dark, 3.0);
+  p.success      = readable(pick(def, {"successColor", "stringColor"}, Rgba{0x75,0xd6,0x9c,255}), p.base_bg, def.dark, 3.0);
+  p.surface      = p.base_bg;
+  p.surface_alt  = pick(def, {"codeBlock", "secondaryBackground"}, p.secondary_bg);
+  p.surface_raised = pick(def, {"contrastColor", "completionWindowBackground"}, p.surface_alt);
 
   // --- Qt chrome (Phase 9) ---
   p.chrome_header       = pick(def, {"headerColor"}, p.secondary_bg);
@@ -119,6 +132,23 @@ IdaPalette map_theme(const DokiThemeDefinition &def)
   // Phase 2 new listing roles
   p.lst_info     = pick(def, {"infoForeground"}, p.text);
   p.lst_unused   = pick(def, {"unusedColor", "disabledColor"}, p.disabled);
+  p.lst_text     = readable(p.lst_text, p.lst_bg, def.dark, 4.0);
+  p.lst_comment  = readable(p.lst_comment, p.lst_bg, def.dark, 3.0);
+  p.lst_keyword  = readable(p.lst_keyword, p.lst_bg, def.dark, 3.0);
+  p.lst_string   = readable(p.lst_string, p.lst_bg, def.dark, 3.0);
+  p.lst_number   = readable(p.lst_number, p.lst_bg, def.dark, 3.0);
+  p.lst_name     = readable(p.lst_name, p.lst_bg, def.dark, 3.0);
+  p.lst_register = readable(p.lst_register, p.lst_bg, def.dark, 3.0);
+  p.lst_info     = readable(p.lst_info, p.lst_bg, def.dark, 3.0);
+  p.lst_unused   = readable(p.lst_unused, p.lst_bg, def.dark, 2.4);
+  p.addr_expr      = readable(pick(def, {"classNameColor", "keyColor"}, p.lst_register), p.lst_bg, def.dark, 3.0);
+  p.patched_bytes  = readable(pick(def, {"diff.modified", "warningColor", "constantColor"}, p.warning), p.lst_bg, def.dark, 3.0);
+  p.unsaved_changes= readable(pick(def, {"diff.inserted", "successColor", "stringColor"}, p.success), p.lst_bg, def.dark, 3.0);
+  p.pfx_func = p.lst_name; p.pfx_insn = p.lst_keyword; p.pfx_data = p.lst_string;
+  p.pfx_extern = p.lst_register; p.pfx_unexplored = p.lst_unused; p.pfx_libfunc = p.lst_info;
+  p.pfx_hidden = p.lst_comment; p.pfx_lumina = p.success;
+  p.pfx_current_line = with_alpha(p.editor_accent, 120);
+  p.pfx_current_item = p.caret_row;
 
   // --- Selection / search / breakpoints (Phase 3) ---
   p.search_bg       = pick(def, {"searchBackground"}, p.editor_accent);
@@ -126,6 +156,26 @@ IdaPalette map_theme(const DokiThemeDefinition &def)
   p.ident_highlight = pick(def, {"identifierHighlight", "highlightColor"}, p.caret_row);
   p.bp_inactive     = pick(def, {"breakpointColor"}, p.secondary_bg);
   p.bp_active       = pick(def, {"breakpointActiveColor"}, p.editor_accent);
+  p.pfx_current_item = p.ident_highlight;
+  p.search_fg       = readable(p.search_fg, p.search_bg, def.dark, 3.0);
+  p.selection_fg    = readable(p.selection_fg, p.selection_bg, def.dark, 3.0);
+  p.highlight[0] = with_alpha(p.search_bg, p.search_bg.a == 255 ? 210 : p.search_bg.a);
+  p.highlight[1] = with_alpha(p.ident_highlight, p.ident_highlight.a == 255 ? 160 : p.ident_highlight.a);
+  p.highlight[2] = with_alpha(p.editor_accent, 120);
+  p.highlight[3] = with_alpha(p.ui_accent, 115);
+  p.highlight[4] = with_alpha(p.lst_string, 110);
+  p.highlight[5] = with_alpha(p.lst_number, 110);
+  p.highlight[6] = with_alpha(p.lst_register, 110);
+  p.highlight[7] = with_alpha(p.warning, 120);
+  p.ovl_current_line = with_alpha(p.caret_row, 90);
+  p.ovl_trace = with_alpha(p.success, 95);
+  p.ovl_trace_ovl = with_alpha(p.success, 150);
+  p.ovl_bookmark = with_alpha(p.warning, 170);
+  for ( int i = 0; i < 16; ++i )
+  {
+    const Rgba seed = (i % 4 == 0) ? p.editor_accent : (i % 4 == 1) ? p.lst_string : (i % 4 == 2) ? p.lst_number : p.lst_register;
+    p.ovl_extra[i] = with_alpha(seed, (uint8_t)(55 + (i % 4) * 20));
+  }
 
   // --- Graph view (Phase 4) ---
   p.graph_bg_top      = pick(def, {"baseBackground"}, p.window_bg);
@@ -133,6 +183,17 @@ IdaPalette map_theme(const DokiThemeDefinition &def)
   p.graph_node_title  = pick(def, {"foregroundColor"}, p.text);
   p.graph_edge_normal = p.editor_accent;
   p.graph_edge_yes    = p.editor_accent;
+  p.graph_title_normal = p.surface_raised;
+  p.graph_title_selected = blend(p.surface_raised, p.editor_accent, 0.35);
+  p.graph_title_current = blend(p.surface_raised, p.editor_accent, 0.55);
+  p.graph_frame_selected = p.editor_accent;
+  p.graph_frame_group = p.ui_accent;
+  p.graph_high1 = p.highlight[0];
+  p.graph_high2 = p.highlight[1];
+  p.graph_foreign = p.lst_unused;
+  p.graph_edge_no = p.error;
+  p.graph_edge_high = p.warning;
+  p.graph_edge_selected = p.lst_name;
 
   // --- nav band ---
   // The nav band should look like IDA's default band, not the doki accent.
@@ -148,6 +209,41 @@ IdaPalette map_theme(const DokiThemeDefinition &def)
   p.nav_start     = pick(def, {"startColor"}, def_nav);
   p.nav_stop      = pick(def, {"stopColor"},  def_nav);
   p.nav_highlight = pick(def, {"highlightColor"}, def_nav_hi);
+  p.nav_function = p.lst_name; p.nav_lib_function = p.lst_info; p.nav_code = p.lst_keyword;
+  p.nav_data = p.lst_string; p.nav_undefined = p.lst_unused; p.nav_extern = p.lst_register;
+  p.nav_lumina_function = p.success;
+  p.nav_hl_function = blend(p.nav_function, p.nav_highlight, 0.45);
+  p.nav_hl_lib_function = blend(p.nav_lib_function, p.nav_highlight, 0.45);
+  p.nav_hl_code = blend(p.nav_code, p.nav_highlight, 0.45);
+  p.nav_hl_data = blend(p.nav_data, p.nav_highlight, 0.45);
+  p.nav_hl_undefined = blend(p.nav_undefined, p.nav_highlight, 0.45);
+  p.nav_hl_extern = blend(p.nav_extern, p.nav_highlight, 0.45);
+  p.nav_hl_lumina_function = blend(p.nav_lumina_function, p.nav_highlight, 0.45);
+  p.nav_hl_outline = p.editor_accent;
+  p.nav_error = p.error;
+  p.nav_gap = p.lst_bg;
+  p.nav_cursor = p.editor_accent;
+  p.nav_auto_analysis_cursor = p.warning;
+
+  p.diff_inserted = with_alpha(pick(def, {"diff.inserted", "successColor", "stringColor"}, p.success), 120);
+  p.diff_deleted = with_alpha(pick(def, {"diff.deleted", "errorColor"}, p.error), 120);
+  p.diff_modified = with_alpha(pick(def, {"diff.modified", "warningColor", "constantColor"}, p.warning), 120);
+  p.diff_conflict = with_alpha(pick(def, {"diff.conflict", "errorColor"}, p.error), 150);
+  p.diff_pick = p.diff_inserted; p.diff_leave = p.diff_deleted;
+  p.diff_conflict_bg = p.diff_conflict; p.diff_boundary = p.editor_accent;
+
+  p.chooser_highlight = p.highlight[1]; p.chooser_highlight_selected = p.selection_bg;
+  p.chooser_cut = p.lst_unused; p.chooser_cut_selected = readable(p.lst_unused, p.selection_bg, def.dark, 3.0);
+  p.log_fg = readable(p.text, p.surface_alt, def.dark, 4.0); p.log_bg = p.surface_alt;
+  p.xref_bg = p.surface_alt; p.xref_search = p.search_bg; p.xref_selected = p.selection_bg; p.xref_branch = p.editor_accent;
+  p.jump_bg = p.surface_alt; p.jump_selected_bg = p.selection_bg; p.jump_selected_fg = p.selection_fg;
+  p.jump_button_hover = p.highlight[2]; p.jump_button_checked = p.highlight[3];
+  p.cpu_label = p.lst_info;
+  p.graph_mini_fog = with_alpha(p.lst_bg, 160); p.graph_mini_crosshair = p.editor_accent;
+  p.xg_node_bg = p.surface_raised; p.xg_node_import = blend(p.surface_raised, p.lst_info, 0.25);
+  p.xg_node_code = blend(p.surface_raised, p.lst_keyword, 0.25); p.xg_node_data = blend(p.surface_raised, p.lst_string, 0.25);
+  p.xg_node_border = p.border; p.xg_node_text = p.text; p.xg_edge = p.editor_accent; p.xg_view_bg = p.lst_bg; p.xg_path = p.warning;
+  p.pathfinder_drag = p.editor_accent; p.pathfinder_delete = p.error;
 
   return p;
 }

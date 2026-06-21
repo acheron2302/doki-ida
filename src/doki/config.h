@@ -14,6 +14,11 @@ struct DokiConfig
   bool sticker_enabled = true;    // show the character sticker
   bool wallpaper_enabled = true;  // show the full-listing wallpaper (if any)
   std::string original_theme;     // IDA theme active before doki first applied
+  // false means the generated CSS/IDA default nav colors are used and Doki
+  // does not install the runtime SDK nav-band gradient colorizer. The nav
+  // band then reflects the theme.css `navband_t` block colors instead of
+  // the live doki gradient.
+  bool live_nav_colorizer_enabled = false;
 };
 
 // Load config; returns defaults if the file is absent or unreadable.

@@ -88,6 +88,63 @@ void ThemeApplier::ensure_colorizer_installed()
   m_colorizer_installed = true;
 }
 
+// Restore whatever nav colorizer was active before Doki installed its own.
+// Idempotent: safe to call when no colorizer was installed. Does NOT
+// touch the Qt sticker overlay, so this is the right primitive for live
+// toggling of the nav-band gradient.
+void ThemeApplier::restore_colorizer()
+{
+  if ( !m_colorizer_installed )
+    return;
+  nav_colorizer_t *cur_func = nullptr;
+  void *cur_ud = nullptr;
+  set_nav_colorizer(&cur_func, &cur_ud,
+                    (nav_colorizer_t *)m_prev_func, m_prev_ud);
+  m_colorizer_installed = false;
+  m_prev_func = nullptr;
+  m_prev_ud = nullptr;
+  refresh_navband(true);
+}
+
+// Single source of truth for the "live nav colorizer on/off" branch.
+// Three call sites (apply, apply_live_only, set_live_nav_colorizer_enabled)
+// used to each reimplement this three-way decision tree; one subtle
+// behavioral asymmetry has already crept in (the live toggle was missing
+// the no-colorizer refresh). Keep all three call sites delegated here so
+// the tree and the log message live in one place.
+void ThemeApplier::update_colorizer_state(bool enabled)
+{
+  if ( enabled )
+  {
+    // Guard against installing the doki colorizer with a zero/default
+    // palette (m_palette still default-constructed because map_theme()
+    // hasn't run yet). Painting with nav_start == nav_stop == black
+    // would flash a black nav band. Defer until a theme is applied.
+    if ( !m_has_palette )
+    {
+      doki::msg_log("  colorizer: deferred (no Doki theme applied yet)\n");
+      return;
+    }
+    ensure_colorizer_installed();
+    refresh_navband(true);
+  }
+  else
+  {
+    if ( m_colorizer_installed )
+    {
+      doki::msg_log("  live nav gradient disabled; "
+                    "restored previous nav colorizer.\n");
+      restore_colorizer();
+    }
+    else
+    {
+      // No-op for the colorizer, but still nudge the nav band so any
+      // CSS-only changes (e.g. after a reselect) paint.
+      refresh_navband(true);
+    }
+  }
+}
+
 void ThemeApplier::ensure_overlay_manager()
 {
   if ( m_overlay )
@@ -98,7 +155,8 @@ void ThemeApplier::ensure_overlay_manager()
 }
 
 bool ThemeApplier::apply(const DokiThemeDefinition &def, bool activate,
-                         bool with_sticker, bool with_wallpaper)
+                         bool with_sticker, bool with_wallpaper,
+                         bool live_nav_colorizer)
 {
   InstallResult res = install_theme(def, activate, with_sticker, with_wallpaper);
   if ( !res.ok )
@@ -109,8 +167,7 @@ bool ThemeApplier::apply(const DokiThemeDefinition &def, bool activate,
   m_min_ea = inf_get_min_ea();
   m_max_ea = inf_get_max_ea();
 
-  ensure_colorizer_installed();
-  refresh_navband(true);
+  update_colorizer_state(live_nav_colorizer);
   refresh_idaview_anyway();
 
   // Drive the Qt overlay from the same install result. The overlay is the
@@ -147,15 +204,15 @@ bool ThemeApplier::apply(const DokiThemeDefinition &def, bool activate,
 }
 
 void ThemeApplier::apply_live_only(const DokiThemeDefinition &def,
-                                   bool with_sticker)
+                                   bool with_sticker,
+                                   bool live_nav_colorizer)
 {
   m_palette = map_theme(def);
   m_has_palette = true;
   m_min_ea = inf_get_min_ea();
   m_max_ea = inf_get_max_ea();
 
-  ensure_colorizer_installed();
-  refresh_navband(true);
+  update_colorizer_state(live_nav_colorizer);
   refresh_idaview_anyway();
 
   // The sticker overlay reads from the already-installed theme folder,
@@ -175,6 +232,11 @@ void ThemeApplier::apply_live_only(const DokiThemeDefinition &def,
   }
 }
 
+void ThemeApplier::set_live_nav_colorizer_enabled(bool enabled)
+{
+  update_colorizer_state(enabled);
+}
+
 void ThemeApplier::shutdown()
 {
   // Tear down the overlay first so we never leave a stuck Qt widget behind
@@ -185,15 +247,7 @@ void ThemeApplier::shutdown()
     m_overlay.reset();
   }
 
-  if ( !m_colorizer_installed )
-    return;
-  // Restore whatever colorizer was active before us.
-  nav_colorizer_t *cur_func = nullptr;
-  void *cur_ud = nullptr;
-  set_nav_colorizer(&cur_func, &cur_ud,
-                    (nav_colorizer_t *)m_prev_func, m_prev_ud);
-  m_colorizer_installed = false;
-  refresh_navband(true);
+  restore_colorizer();
 }
 
 } // namespace doki

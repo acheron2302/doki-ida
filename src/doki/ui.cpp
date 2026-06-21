@@ -69,12 +69,13 @@ ssize_t choose_theme(const ThemeRegistry &reg)
 //----------------------------------------------------------------------------
 static IDokiActions *g_actions = nullptr;
 
-#define DOKI_ACT_PICK    "doki:pick"
-#define DOKI_ACT_RANDOM  "doki:random"
-#define DOKI_ACT_NEXT    "doki:next"
-#define DOKI_ACT_STICKER "doki:toggle_sticker"
-#define DOKI_ACT_WALL    "doki:toggle_wallpaper"
-#define DOKI_ACT_RESTORE "doki:restore"
+#define DOKI_ACT_PICK      "doki:pick"
+#define DOKI_ACT_RANDOM    "doki:random"
+#define DOKI_ACT_NEXT      "doki:next"
+#define DOKI_ACT_STICKER   "doki:toggle_sticker"
+#define DOKI_ACT_WALL      "doki:toggle_wallpaper"
+#define DOKI_ACT_NAVCLR    "doki:toggle_live_nav_colorizer"
+#define DOKI_ACT_RESTORE   "doki:restore"
 
 struct base_handler_t : public action_handler_t
 {
@@ -109,18 +110,24 @@ struct wallpaper_handler_t : public base_handler_t
   virtual int idaapi activate(action_activation_ctx_t *) override
   { if ( g_actions ) g_actions->toggle_wallpaper(); return 1; }
 };
+struct nav_colorizer_handler_t : public base_handler_t
+{
+  virtual int idaapi activate(action_activation_ctx_t *) override
+  { if ( g_actions ) g_actions->toggle_live_nav_colorizer(); return 1; }
+};
 struct restore_handler_t : public base_handler_t
 {
   virtual int idaapi activate(action_activation_ctx_t *) override
   { if ( g_actions ) g_actions->restore_default(); return 1; }
 };
 
-static pick_handler_t        g_pick;
-static random_handler_t      g_random;
-static next_handler_t        g_next;
-static sticker_handler_t     g_sticker;
-static wallpaper_handler_t   g_wall;
-static restore_handler_t     g_restore;
+static pick_handler_t          g_pick;
+static random_handler_t        g_random;
+static next_handler_t          g_next;
+static sticker_handler_t       g_sticker;
+static wallpaper_handler_t     g_wall;
+static nav_colorizer_handler_t g_navclr;
+static restore_handler_t       g_restore;
 
 struct act_def_t
 {
@@ -131,12 +138,13 @@ struct act_def_t
 };
 static const act_def_t g_defs[] =
 {
-  { DOKI_ACT_PICK,    "Doki Theme: Pick character...",       &g_pick,    false },
-  { DOKI_ACT_RANDOM,  "Doki Theme: Random character",        &g_random,  false },
-  { DOKI_ACT_NEXT,    "Doki Theme: Next character",          &g_next,    false },
-  { DOKI_ACT_STICKER, "Doki Theme: Toggle sticker",          &g_sticker, true  },
-  { DOKI_ACT_WALL,    "Doki Theme: Toggle wallpaper",        &g_wall,    true  },
-  { DOKI_ACT_RESTORE, "Doki Theme: Restore default",         &g_restore, false },
+  { DOKI_ACT_PICK,    "Doki Theme: Pick character...",          &g_pick,    false },
+  { DOKI_ACT_RANDOM,  "Doki Theme: Random character",           &g_random,  false },
+  { DOKI_ACT_NEXT,    "Doki Theme: Next character",             &g_next,    false },
+  { DOKI_ACT_STICKER, "Doki Theme: Toggle sticker",             &g_sticker, true  },
+  { DOKI_ACT_WALL,    "Doki Theme: Toggle wallpaper",           &g_wall,    true  },
+  { DOKI_ACT_NAVCLR,  "Doki Theme: Toggle live nav colorizer",  &g_navclr,  true  },
+  { DOKI_ACT_RESTORE, "Doki Theme: Restore default",            &g_restore, false },
 };
 
 static bool initial_checked_for(const char *name)
@@ -145,6 +153,7 @@ static bool initial_checked_for(const char *name)
     return false;
   if ( !strcmp(name, DOKI_ACT_STICKER) ) return g_actions->is_sticker_enabled();
   if ( !strcmp(name, DOKI_ACT_WALL)    ) return g_actions->is_wallpaper_enabled();
+  if ( !strcmp(name, DOKI_ACT_NAVCLR)  ) return g_actions->is_live_nav_colorizer_enabled();
   return false;
 }
 

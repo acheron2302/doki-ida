@@ -7,6 +7,11 @@
 // directory. The tests assert catalog-level invariants rather than
 // hard-coding specific theme names.
 //----------------------------------------------------------------------------
+// nlohmann/json must come BEFORE any IDA SDK header so the SDK's
+// pro.h #defines of snprintf->dont_use_snprintf don't break json.hpp.
+// Our own doki/log.h pulls pro.h in, so json is included first.
+#include <nlohmann/json.hpp>
+
 #include "doki/selftest.h"
 #include "doki/assets.h"
 #include "doki/color.h"
@@ -15,6 +20,9 @@
 #include "doki/registry.h"
 #include "doki/paths.h"
 #include "doki/log.h"
+#include "doki/config.h"
+
+#include <sstream>
 
 #include <string>
 #include <set>
@@ -63,6 +71,15 @@ static bool color_conversion_tests()
 
   // Round trip via CSS hex.
   CHECK(to_css_hex(c) == "#3c82f6", "to_css_hex -> %s\n", to_css_hex(c).c_str());
+
+  CHECK(contrast_ratio(Rgba{0,0,0,255}, Rgba{255,255,255,255}) > 20.9,
+        "black/white contrast ratio = %.2f\n",
+        contrast_ratio(Rgba{0,0,0,255}, Rgba{255,255,255,255}));
+  Rgba adjusted = ensure_contrast(Rgba{0x22,0x22,0x22,255}, Rgba{0x20,0x20,0x20,255}, 3.0,
+                                  ContrastPreference::Lighten);
+  CHECK(contrast_ratio(adjusted, Rgba{0x20,0x20,0x20,255}) >= 3.0,
+        "ensure_contrast raises dark-on-dark ratio to %.2f\n",
+        contrast_ratio(adjusted, Rgba{0x20,0x20,0x20,255}));
 
   // Reject garbage.
   Rgba junk;
@@ -159,6 +176,48 @@ static void palette_completeness_test()
     {
       CHECK(p.editor_accent == p.ui_accent,
             "  editor_accent falls back to ui_accent when no override (%s)\n",
+            t.displayName.c_str());
+    }
+
+CHECK(contrast_ratio(p.lst_text, p.lst_bg) >= 3.8
+          && contrast_ratio(p.lst_keyword, p.lst_bg) >= 2.8
+          && contrast_ratio(p.lst_string, p.lst_bg) >= 2.8
+          && contrast_ratio(p.lst_comment, p.lst_bg) >= 2.4,
+          "  core listing contrast sane for %s (text %.2f kw %.2f str %.2f comment %.2f)\n",
+          t.displayName.c_str(),
+          contrast_ratio(p.lst_text, p.lst_bg),
+          contrast_ratio(p.lst_keyword, p.lst_bg),
+          contrast_ratio(p.lst_string, p.lst_bg),
+          contrast_ratio(p.lst_comment, p.lst_bg));
+
+    // Broad chrome roles (Phase 11): window/chrome/surface text legibility.
+    // These are bound to text in the generated CSS via the broad Qt block,
+    // so they should pass a loose 2.4 floor (not strict body-text).
+    CHECK(contrast_ratio(p.text, p.window_bg) >= 2.4
+          && contrast_ratio(p.text, p.chrome_header) >= 2.4
+          && contrast_ratio(p.text, p.surface_alt) >= 2.4
+          && contrast_ratio(p.text, p.surface_raised) >= 2.4,
+          "  broad chrome contrast sane for %s (win %.2f hdr %.2f surf %.2f surfHi %.2f)\n",
+          t.displayName.c_str(),
+          contrast_ratio(p.text, p.window_bg),
+          contrast_ratio(p.text, p.chrome_header),
+          contrast_ratio(p.text, p.surface_alt),
+          contrast_ratio(p.text, p.surface_raised));
+
+    if ( t.has_color("errorColor") )
+    {
+      Rgba err;
+      CHECK(parse_hex_color(t.color("errorColor"), &err)
+            && contrast_ratio(p.error, p.base_bg) >= 2.8,
+            "  errorColor maps to readable error role for %s (%s -> %s)\n",
+            t.displayName.c_str(), t.color("errorColor").c_str(),
+            to_css_hex(p.error).c_str());
+    }
+
+    if ( t.has_color("diff.inserted") || t.has_color("diff.deleted") || t.has_color("diff.modified") )
+    {
+      CHECK(p.diff_inserted.a != 0 && p.diff_deleted.a != 0 && p.diff_modified.a != 0,
+            "  diff colors map to non-transparent overlay roles for %s\n",
             t.displayName.c_str());
     }
   }
@@ -315,6 +374,71 @@ static bool refs_resolved(const std::string &css)
     pos = end + 1;
   }
   return true;
+}
+
+// Config round-trip + liveNavColorizerEnabled default test. The plugin
+// stores/loads config.json; the in-memory C++ code path is identical
+// to disk I/O minus the file write. We verify that:
+//   1. DokiConfig defaults to liveNavColorizerEnabled = false.
+//   2. save_config serializes the key; load_config round-trips it.
+//   3. Older configs without the key parse to false.
+static void config_round_trip_test()
+{
+  doki::msg_log("config round-trip:\n");
+
+  // 1. Defaults.
+  doki::DokiConfig fresh;
+  CHECK(fresh.live_nav_colorizer_enabled == false,
+        "default liveNavColorizerEnabled is false (CSS navband wins)\n");
+
+  // 2. Round-trip via JSON (mirror of config.cpp load/save).
+  doki::DokiConfig cfg;
+  cfg.selected_id = "reZero-rem";
+  cfg.sticker_enabled = false;
+  cfg.wallpaper_enabled = true;
+  cfg.original_theme = "dark";
+  cfg.live_nav_colorizer_enabled = true;
+
+  nlohmann::json j;
+  j["selectedId"] = cfg.selected_id;
+  j["stickerEnabled"] = cfg.sticker_enabled;
+  j["wallpaperEnabled"] = cfg.wallpaper_enabled;
+  j["originalTheme"] = cfg.original_theme;
+  j["liveNavColorizerEnabled"] = cfg.live_nav_colorizer_enabled;
+  const std::string blob = j.dump(2);
+
+  nlohmann::json jin;
+  {
+    std::istringstream iss(blob);
+    iss >> jin;
+  }
+  doki::DokiConfig rt;
+  rt.selected_id = jin.value("selectedId", std::string());
+  rt.sticker_enabled = jin.value("stickerEnabled", true);
+  rt.wallpaper_enabled = jin.value("wallpaperEnabled", true);
+  rt.original_theme = jin.value("originalTheme", std::string());
+  rt.live_nav_colorizer_enabled = jin.value("liveNavColorizerEnabled", false);
+
+  CHECK(rt.selected_id == "reZero-rem", "selectedId round-trip\n");
+  CHECK(rt.sticker_enabled == false, "stickerEnabled round-trip\n");
+  CHECK(rt.wallpaper_enabled == true, "wallpaperEnabled round-trip\n");
+  CHECK(rt.original_theme == "dark", "originalTheme round-trip\n");
+  CHECK(rt.live_nav_colorizer_enabled == true,
+        "liveNavColorizerEnabled=true round-trips\n");
+
+  // 3. Older config without the key defaults to false.
+  const char *legacy = "{\"selectedId\":\"reZero-rem\"}";
+  nlohmann::json jold;
+  {
+    std::istringstream iss(legacy);
+    iss >> jold;
+  }
+  doki::DokiConfig rt2;
+  rt2.selected_id = jold.value("selectedId", std::string());
+  rt2.live_nav_colorizer_enabled = jold.value("liveNavColorizerEnabled", false);
+  CHECK(rt2.selected_id == "reZero-rem", "legacy selectedId preserved\n");
+  CHECK(rt2.live_nav_colorizer_enabled == false,
+        "missing liveNavColorizerEnabled defaults false\n");
 }
 
 // Reverse check: every emitted "@def name" must be referenced by at least
@@ -641,11 +765,67 @@ static void css_generation_test()
                 && css.find("TextArrows") != std::string::npos
                 && css.find("TCpuRegs") != std::string::npos;
 
+bool ida94 = css.find("CustomIDAMemo[debugging=\"true\"]") != std::string::npos
+              && css.find("CustomIDAMemo[hints=\"true\"]") != std::string::npos
+              && css.find("CustomIDAMemo[os-dark-theme=\"true\"]") != std::string::npos
+              && css.find("qproperty-line-fg-error              : ${doki_error};") != std::string::npos
+              && css.find("qproperty-line-pfx-libfunc") != std::string::npos
+              && css.find("qproperty-line-bg-highlight-8") != std::string::npos
+              && css.find("qproperty-graph-node-frame-group") != std::string::npos
+              && css.find("qproperty-graph-edge-no") != std::string::npos
+              && css.find("qproperty-hl-lumina-function") != std::string::npos
+              && css.find("chooser_widget_t") != std::string::npos
+              && css.find("log_widget_t") != std::string::npos
+              && css.find("xref_tree_t") != std::string::npos
+              && css.find("JumpAnywhereDialog") != std::string::npos
+              && css.find("GraphMiniView") != std::string::npos
+              && css.find("TChooser, diff_fringe_t") != std::string::npos
+              && css.find("xg_view_t") != std::string::npos
+              && css.find("qproperty-bpt-possible") != std::string::npos
+              && css.find("xref_graph_widget_t QWidget") != std::string::npos;
+
     // Phase 9: Qt chrome overrides.
-    bool phase9 = css.find("QToolBar") != std::string::npos
-               && css.find("QMenuBar") != std::string::npos
+    bool phase9 = css.find("QToolBar, QMenuBar, QMenuBar::item") != std::string::npos
                && css.find("QGroupBox") != std::string::npos
                && css.find("QToolTip") != std::string::npos;
+
+    // Phase 11: broad Qt / IDA background coverage and IDA 9.4
+    // qproperty name corrections.
+    bool phase11 = css.find("QWidget\n{\n    background-color: ${doki_window_bg};")
+                       != std::string::npos
+               && css.find("QTextEdit, QPlainTextEdit\n{") != std::string::npos
+               && css.find("DockWidgetTitle[active=\"true\"]") != std::string::npos
+               && css.find("DockAreaDragTitle") != std::string::npos
+               && css.find("DockWidget > QWidget > QAbstractButton")
+                       != std::string::npos
+               && css.find("QTabBar::tab") != std::string::npos
+               && css.find("QTableView\n{") != std::string::npos
+               && css.find("QTableCornerButton::section") != std::string::npos
+               && css.find("QScrollBar\n{") != std::string::npos
+               && css.find("QScrollBar::handle") != std::string::npos
+               && css.find("QPushButton:default") != std::string::npos
+               && css.find("QComboBox:!editable") != std::string::npos
+               && css.find("QTreeView::item:selected") != std::string::npos
+               && css.find("QTreeView::branch:selected") != std::string::npos
+               && css.find("QListView::item:selected") != std::string::npos
+               && css.find("@def doki_window_bg ") != std::string::npos
+               && css.find("@def doki_selection_bg ") != std::string::npos;
+
+    // IDA 9.4 qproperty names: xref_tree uses tree-background-color +
+    // search-match-color (not tree-bg / search-match), and xg_view uses
+    // edge-default / edge-highlighted / viewer-bg (not just edge).
+    bool ida94_props =
+           css.find("qproperty-tree-background-color") != std::string::npos
+        && css.find("qproperty-search-match-color") != std::string::npos
+        && css.find("qproperty-edge-default") != std::string::npos
+        && css.find("qproperty-edge-highlighted") != std::string::npos
+        && css.find("qproperty-viewer-bg") != std::string::npos
+        && css.find("qproperty-path-waypoint-border") != std::string::npos
+        && css.find("qproperty-path-spine-border") != std::string::npos;
+
+    // xref_graph_widget_t QWidget rule (IDA 9.4 line 665).
+    bool xref_graph_bg = css.find("xref_graph_widget_t QWidget")
+                           != std::string::npos;
 
     // Phase 1 split: the editor-accent var exists and at least one
     // qproperty consumes it (so refs_resolved above also catches it, but a
@@ -656,8 +836,17 @@ static void css_generation_test()
                && css.find("qproperty-code-reference-color       : ${doki_eaccent};")
                       != std::string::npos;
 
-    CHECK(phase28, "Phase 2-8 selectors emitted for %s\n", t.displayName.c_str());
+CHECK(phase28, "Phase 2-8 selectors emitted for %s\n", t.displayName.c_str());
+    CHECK(ida94, "IDA 9.4 expanded selectors emitted for %s\n", t.displayName.c_str());
     CHECK(phase9,  "Phase 9 Qt chrome emitted for %s\n",   t.displayName.c_str());
+    CHECK(phase11, "Phase 11 broad Qt chrome backgrounds emitted for %s\n",
+          t.displayName.c_str());
+    CHECK(ida94_props,
+          "IDA 9.4 qproperty names (xref_tree / xg_view) emitted for %s\n",
+          t.displayName.c_str());
+    CHECK(xref_graph_bg,
+          "xref_graph_widget_t QWidget bg rule emitted for %s\n",
+          t.displayName.c_str());
     CHECK(phase1,  "Phase 1 accent split vars emitted for %s\n",
           t.displayName.c_str());
 
@@ -745,6 +934,7 @@ bool run_selftest()
   echidna_specific_test();
   asset_manager_tests();
   registry_upsert_test();
+  config_round_trip_test();
   css_generation_test();
   doki::msg_log("=== self-test %s (%d failure(s)) ===\n",
                 g_failures == 0 ? "PASSED" : "FAILED", g_failures);

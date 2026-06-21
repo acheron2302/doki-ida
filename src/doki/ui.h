@@ -18,12 +18,14 @@ struct IDokiActions
   virtual void apply_next() = 0;
   virtual void toggle_sticker() = 0;
   virtual void toggle_wallpaper() = 0;
+  virtual void toggle_live_nav_colorizer() = 0;
   virtual void restore_default() = 0;
 
   // State accessors used to set the menu checkmark at registration time and
   // after every toggle. Plugin overrides return the persisted config flags.
   virtual bool is_sticker_enabled()                 { return true;  }
   virtual bool is_wallpaper_enabled()               { return true;  }
+  virtual bool is_live_nav_colorizer_enabled()      { return false; }
 
   virtual ~IDokiActions() {}
 };

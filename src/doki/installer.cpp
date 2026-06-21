@@ -64,6 +64,13 @@ static bool write_text_file(const std::string &path, const std::string &content)
 
 static bool copy_binary_file(const std::string &src, const std::string &dst)
 {
+  // IMPORTANT: do NOT consult (bool)in after the copy. With MSVC (and several
+  // other stdlibs) reaching EOF sets both eofbit and failbit on the
+  // ifstream, so a perfectly successful read would make the function
+  // return false and the installer would silently skip the wallpaper
+  // (leaving the cache file in place, the theme folder empty, and the
+  // generated theme.css with no url(...) line). Only the writer's state
+  // is reliable here.
   std::ifstream in(src, std::ios::binary);
   if ( !in )
     return false;
@@ -71,7 +78,10 @@ static bool copy_binary_file(const std::string &src, const std::string &dst)
   if ( !out )
     return false;
   out << in.rdbuf();
-  return (bool)out && (bool)in;
+  out.flush();
+  if ( !out )
+    return false;
+  return true;
 }
 
 void activate_theme(const std::string &theme_name)
@@ -205,10 +215,15 @@ InstallResult install_theme(const DokiThemeDefinition &def, bool activate,
     activate_theme(r.theme_name);
 
   r.ok = true;
+  // Reflect the actual opt (which gates the CSS url() line) so the log
+  // can't disagree with the generated theme.css. r.wallpaper_installed
+  // and opt.include_wallpaper are set in the same block, so they're
+  // always equal in practice — but logging the opt makes any future
+  // divergence visible immediately.
   doki::msg_log("installed '%s' -> %s (sticker=%s, wallpaper=%s, active=%s)\n",
                 def.displayName.c_str(), r.theme_name.c_str(),
                 r.sticker_installed ? "yes" : "no",
-                r.wallpaper_installed ? "yes" : "no",
+                opt.include_wallpaper ? "yes" : "no",
                 activate ? "yes" : "no");
   return r;
 }

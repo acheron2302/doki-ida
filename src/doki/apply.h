@@ -39,17 +39,31 @@ public:
   // 'with_sticker' controls whether the sticker is installed;
   // 'with_wallpaper' controls whether the full-listing wallpaper is
   // installed (and emitted in the generated CSS).
+  // 'live_nav_colorizer' controls whether Doki installs the runtime SDK
+  // nav-band gradient colorizer. When false, the previously-installed IDA
+  // nav colorizer is restored so the generated CSS `navband_t` block
+  // colors show through.
   bool apply(const DokiThemeDefinition &def,
              bool activate = true,
              bool with_sticker = true,
-             bool with_wallpaper = true);
+             bool with_wallpaper = true,
+             bool live_nav_colorizer = false);
 
   // Live-only path used by auto-restore on plugin init. Re-applies the
   // nav colorizer and the sticker overlay without writing the theme
   // folder or fetching assets from the network. Safe to call before the
   // GUI is fully realized.
   void apply_live_only(const DokiThemeDefinition &def,
-                       bool with_sticker = true);
+                       bool with_sticker = true,
+                       bool live_nav_colorizer = false);
+
+  // Toggle the live nav-band gradient colorizer without touching the
+  // install pipeline or the sticker overlay. When 'enabled' is false and
+  // Doki previously installed its colorizer, the original IDA colorizer
+  // is restored immediately and the nav band is refreshed. When true,
+  // the doki gradient is installed (if not already) and the nav band is
+  // refreshed. Idempotent.
+  void set_live_nav_colorizer_enabled(bool enabled);
 
   // Restore the previous nav colorizer (idempotent). Called from the plugin
   // destructor.
@@ -63,6 +77,11 @@ public:
 
 private:
   void ensure_colorizer_installed();
+  void restore_colorizer();
+  // Single source of truth for the "live nav colorizer on/off" branch.
+  // Called from apply(), apply_live_only(), and set_live_nav_colorizer_enabled()
+  // so the three entry points share one decision tree and one log message.
+  void update_colorizer_state(bool enabled);
   void ensure_overlay_manager();
 
   IdaPalette m_palette;

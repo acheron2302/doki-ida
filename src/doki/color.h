@@ -39,4 +39,31 @@ std::string to_css_hex(const Rgba &c);
 // "rgba(r, g, b, a.aaa)" - for CSS that wants alpha (e.g. translucent panes).
 std::string to_css_rgba(const Rgba &c);
 
+// Relative luminance per WCAG 2.x, using sRGB channels and ignoring alpha.
+double relative_luminance(const Rgba &c);
+
+// WCAG contrast ratio between two opaque colors. Alpha is ignored; callers
+// should composite translucent colors first if that distinction matters.
+double contrast_ratio(const Rgba &a, const Rgba &b);
+
+// Linear RGB blend. t=0 returns a, t=1 returns b. Alpha is blended too.
+Rgba blend(const Rgba &a, const Rgba &b, double t);
+Rgba lighten(const Rgba &c, double amount);
+Rgba darken(const Rgba &c, double amount);
+Rgba with_alpha(const Rgba &c, uint8_t alpha);
+
+enum class ContrastPreference
+{
+  Auto,
+  Lighten,
+  Darken,
+};
+
+// Return fg adjusted toward white or black until it reaches min_ratio against
+// bg, or the closest attempted value if the threshold cannot be met.
+Rgba ensure_contrast(const Rgba &fg,
+                     const Rgba &bg,
+                     double min_ratio,
+                     ContrastPreference preference = ContrastPreference::Auto);
+
 } // namespace doki

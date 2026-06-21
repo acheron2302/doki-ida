@@ -58,6 +58,65 @@ sticker all recolored from the character's palette:
 The CSS uses the per-pixel alpha of the upstream Doki PNG; no CSS opacity,
 no Qt wallpaper layer, no runtime transparency controls.
 
+## Install and setup
+
+**Requirements**
+- IDA Pro 9.0 or newer (developed and tested against IDA 9.4 / SDK 9.3, x64).
+- Internet access the first time you apply each theme; subsequent applies
+  work offline from the local cache.
+
+**Install from the release ZIP**
+The recommended end-user source is the distributable ZIP produced by the
+project build (it contains the plugin DLL and the generated theme catalog).
+
+1. Copy `plugins\doki_theme.dll` into your IDA `plugins` directory, either:
+   - the IDA install dir: `<IDADIR>\plugins\`, or
+   - your user dir: `%APPDATA%\Hex-Rays\IDA Pro\plugins\` (the `$IDAUSR`
+     user directory).
+2. Copy the catalog file `doki-theme\theme_catalog.json` to:
+   ```
+   %APPDATA%\Hex-Rays\IDA Pro\doki-theme\theme_catalog.json
+   ```
+   (i.e. `$IDAUSR\doki-theme\theme_catalog.json`).
+3. Start IDA and open a database. The plugin's menu actions appear under
+   the **Options** menu.
+
+**First-use asset download**
+Sticker and wallpaper images are **not** shipped in the package. The first
+time you apply a character, the plugin downloads its sticker and
+full-listing wallpaper from `https://doki.assets.unthrottled.io` and
+caches them under `$IDAUSR\doki-theme\cache\`. Later applies — including
+offline sessions — read straight from the cache.
+
+For full install, uninstall, and troubleshooting details, see
+[INSTALL.md](INSTALL.md).
+
+## Use the plugin
+
+All actions live under the **Options** menu:
+
+- **Doki Theme: Pick character...** — open the chooser and select a
+  character.
+- **Doki Theme: Random character** / **Doki Theme: Next character** —
+  cycle through themes quickly without opening the chooser.
+- **Doki Theme: Toggle sticker** — show or hide the character overlay on
+  the active view.
+- **Doki Theme: Toggle wallpaper** — show or hide the full-listing
+  wallpaper behind the disassembly.
+- **Doki Theme: Restore default** — revert to your previous
+  (non-Doki) IDA theme.
+
+**What changes when you apply a character**
+- The **navigation band** recolor and the **sticker overlay** apply
+  immediately, live.
+- The full IDA theme (disassembly listing, chrome, selection, caret) is
+  generated under `$IDAUSR\themes\doki-<name>\` and activated via the
+  `ThemeName` registry value. Because IDA loads theme CSS at startup,
+  those colors apply on the next IDA launch, or right away if you
+  reselect the theme in *Options ▸ Colors*.
+- Your selected character and sticker/wallpaper preferences persist
+  across restarts in `$IDAUSR\doki-theme\config.json`.
+
 ## Build
 Prerequisites: IDA SDK 9.2+ (`IDASDK` env var), CMake 3.27+, Visual Studio 2022
 (MSVC), the bundled [`ida-cmake`](https://github.com/allthingsida/ida-cmake)
@@ -84,8 +143,6 @@ cmake --build build --target package        # or: tools\package.ps1
 The catalog generator is also wired into CMake: `cmake --build build
 --target generate_catalog` and `cmake --build build --target
 fetch_upstream` work as shortcuts for steps 0/1 above.
-
-See [INSTALL.md](INSTALL.md) for end-user install steps.
 
 ## Adding more characters
 Official themes come from the pinned upstream snapshot and are

@@ -4,7 +4,9 @@
 #include "doki/color.h"
 
 #include <cctype>
+#include <algorithm>
 #include <cstdio>
+#include <cmath>
 
 namespace doki
 {
@@ -89,6 +91,96 @@ std::string to_css_rgba(const Rgba &c)
   std::snprintf(buf, sizeof(buf), "rgba(%u, %u, %u, %.3f)",
                 c.r, c.g, c.b, c.a / 255.0);
   return buf;
+}
+
+static double srgb_to_linear(uint8_t channel)
+{
+  const double c = channel / 255.0;
+  return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4);
+}
+
+double relative_luminance(const Rgba &c)
+{
+  return 0.2126 * srgb_to_linear(c.r)
+       + 0.7152 * srgb_to_linear(c.g)
+       + 0.0722 * srgb_to_linear(c.b);
+}
+
+double contrast_ratio(const Rgba &a, const Rgba &b)
+{
+  const double la = relative_luminance(a);
+  const double lb = relative_luminance(b);
+  const double hi = std::max(la, lb);
+  const double lo = std::min(la, lb);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+static uint8_t mix_channel(uint8_t a, uint8_t b, double t)
+{
+  t = std::max(0.0, std::min(1.0, t));
+  return (uint8_t)std::lround(a + (b - a) * t);
+}
+
+Rgba blend(const Rgba &a, const Rgba &b, double t)
+{
+  return Rgba{mix_channel(a.r, b.r, t),
+              mix_channel(a.g, b.g, t),
+              mix_channel(a.b, b.b, t),
+              mix_channel(a.a, b.a, t)};
+}
+
+Rgba lighten(const Rgba &c, double amount)
+{
+  return blend(c, Rgba{255,255,255,c.a}, amount);
+}
+
+Rgba darken(const Rgba &c, double amount)
+{
+  return blend(c, Rgba{0,0,0,c.a}, amount);
+}
+
+Rgba with_alpha(const Rgba &c, uint8_t alpha)
+{
+  Rgba out = c;
+  out.a = alpha;
+  return out;
+}
+
+Rgba ensure_contrast(const Rgba &fg,
+                     const Rgba &bg,
+                     double min_ratio,
+                     ContrastPreference preference)
+{
+  if ( contrast_ratio(fg, bg) >= min_ratio )
+    return fg;
+
+  auto best_toward = [&](const Rgba &target) -> Rgba
+  {
+    Rgba best = fg;
+    double best_ratio = contrast_ratio(fg, bg);
+    for ( int i = 1; i <= 20; ++i )
+    {
+      Rgba candidate = blend(fg, target, i / 20.0);
+      const double ratio = contrast_ratio(candidate, bg);
+      if ( ratio > best_ratio )
+      {
+        best = candidate;
+        best_ratio = ratio;
+      }
+      if ( ratio >= min_ratio )
+        return candidate;
+    }
+    return best;
+  };
+
+  if ( preference == ContrastPreference::Lighten )
+    return best_toward(Rgba{255,255,255,fg.a});
+  if ( preference == ContrastPreference::Darken )
+    return best_toward(Rgba{0,0,0,fg.a});
+
+  Rgba light = best_toward(Rgba{255,255,255,fg.a});
+  Rgba dark = best_toward(Rgba{0,0,0,fg.a});
+  return contrast_ratio(light, bg) >= contrast_ratio(dark, bg) ? light : dark;
 }
 
 } // namespace doki
