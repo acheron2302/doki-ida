@@ -26,6 +26,8 @@ Darkness (dark variant) — disassembly listing, navigation band, chrome and
 sticker all recolored from the character's palette:
 
 ![Doki Theme — Darkness (dark)](docs/screenshots/doki-theme-darkness-dark.png)
+<img width="2560" height="1369" alt="image_2026-06-21_22-21-26" src="https://github.com/user-attachments/assets/76c1dce8-51ed-428d-9717-7ff3b8ff64cf" />
+
 
 ## Features
 - Character themes parsed from upstream `*.master.definition.json` files.
