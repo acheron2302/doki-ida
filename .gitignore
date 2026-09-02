@@ -32,3 +32,15 @@ PLAN.md
 VERIFICATION.md
 
 .kilo/
+/cmake-build-debug/
+/cmake-build-debug-visual-studio/
+/cmake-build-default/
+/cmake-build-default-visual-studio/
+/cmake-build-minsizerel/
+/cmake-build-minsizerel-visual-studio/
+/cmake-build-release/
+/cmake-build-release-visual-studio/
+/cmake-build-relwithdebinfo/
+/cmake-build-relwithdebinfo-visual-studio/
+
+.idea/

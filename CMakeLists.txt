@@ -204,15 +204,57 @@ if(DOKI_USE_EMBEDDED_CURL)
         endif()
     endif()
 endif()
+# ---------------------------------------------------------------------------
+# Embed generated/theme_catalog.json directly into the plugin DLL.
+#
+# On by default so end users get a single-file install (the catalog ships
+# inside doki_theme.dll, no theme_catalog.json needs to be deployed to
+# $IDAUSR/doki-theme/). Pass -DDOKI_EMBED_CATALOG=OFF to fall back to the
+# on-disk path during local iteration on the catalog generator.
+#
+# DOKI_HAS_EMBEDDED_CATALOG is consumed as a preprocessor #if by plugin.cpp,
+# so it must be a literal 0/1 (not a generator expression) at TU eval time.
+# Defined here (before target_compile_definitions below) so its value is
+# already known when the target properties are recorded.
+# ---------------------------------------------------------------------------
+option(DOKI_EMBED_CATALOG "Embed generated/theme_catalog.json into the plugin DLL" ON)
+
+set(DOKI_HAS_EMBEDDED_CATALOG 0)
+if(DOKI_EMBED_CATALOG)
+    set(_doki_catalog_json "${CMAKE_CURRENT_SOURCE_DIR}/generated/theme_catalog.json")
+    set(_doki_catalog_hpp  "${CMAKE_CURRENT_BINARY_DIR}/theme_catalog_embed.hpp")
+
+    if(NOT EXISTS "${_doki_catalog_json}")
+        message(FATAL_ERROR
+            "DOKI_EMBED_CATALOG=ON but '${_doki_catalog_json}' is missing. "
+            "Run tools\\generate_theme_catalog.ps1 (or pass -DDOKI_EMBED_CATALOG=OFF).")
+    endif()
+
+    add_custom_command(
+        OUTPUT  "${_doki_catalog_hpp}"
+        COMMAND ${CMAKE_COMMAND}
+                -D INPUT_FILE="${_doki_catalog_json}"
+                -D OUTPUT_FILE="${_doki_catalog_hpp}"
+                -D VAR_NAME=theme_catalog_json
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_file.cmake"
+        DEPENDS "${_doki_catalog_json}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_file.cmake"
+        COMMENT "Embedding theme_catalog.json into theme_catalog_embed.hpp"
+        VERBATIM)
+
+    add_custom_target(generate_embedded_catalog
+        DEPENDS "${_doki_catalog_hpp}")
+    add_dependencies(doki_theme generate_embedded_catalog)
+
+    target_sources(doki_theme PRIVATE "${_doki_catalog_hpp}")
+    target_include_directories(doki_theme PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+    set(DOKI_HAS_EMBEDDED_CATALOG 1)
+endif()
 
 target_compile_definitions(doki_theme PRIVATE
     DOKI_VERSION="${DOKI_VERSION}"
+    DOKI_HAS_EMBEDDED_CATALOG=${DOKI_HAS_EMBEDDED_CATALOG}
 )
-
-# nlohmann/json is a heavy single header: MSVC needs /bigobj and UTF-8 source.
-if(MSVC)
-    target_compile_options(doki_theme PRIVATE /bigobj /utf-8)
-endif()
 
 # Regenerate the theme catalog from the snapshotted upstream
 # definitions. This is a manual step by design: it requires network
@@ -233,20 +275,14 @@ if(WIN32)
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         COMMENT "Snapshotting doki-master-theme definitions into third_party/")
 
-    # Packaging: stage DLL + catalog + attribution into a distributable zip.
-    # By default this re-uses the committed generated/theme_catalog.json
-    # so a clean clone can package without first running fetch_upstream.
-    # To force regeneration, pass -DOKI_REGEN_CATALOG=ON or invoke
-    # `tools\package.ps1 -RegenerateCatalog` directly.
-    option(DOKI_REGEN_CATALOG "Regenerate theme_catalog.json during package" OFF)
-    set(_pkg_args "-Version" "${DOKI_VERSION}")
-    if(DOKI_REGEN_CATALOG)
-        list(APPEND _pkg_args "-RegenerateCatalog")
-    endif()
+    # Packaging: stage DLL + attribution into a distributable zip. The
+    # theme catalog is embedded into doki_theme.dll by the embed step
+    # above (DOKI_EMBED_CATALOG=ON), so no separate catalog file needs
+    # to be staged.
     add_custom_target(package
         COMMAND powershell -ExecutionPolicy Bypass
                 -File "${CMAKE_CURRENT_SOURCE_DIR}/tools/package.ps1"
-                ${_pkg_args}
+                "-Version" "${DOKI_VERSION}"
         DEPENDS doki_theme
         WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
         COMMENT "Packaging doki-theme-ida v${DOKI_VERSION}")

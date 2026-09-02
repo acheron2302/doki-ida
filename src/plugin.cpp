@@ -14,6 +14,14 @@
 #include <fstream>
 #include <sstream>
 
+#if DOKI_HAS_EMBEDDED_CATALOG
+// Generated at configure time by cmake/embed_file.cmake (driven by the
+// DOKI_EMBED_CATALOG option). When embedding is enabled this is the
+// runtime source of truth for the catalog; the on-disk copy in
+// $IDAUSR/doki-theme/theme_catalog.json is ignored.
+#include "theme_catalog_embed.hpp"
+#endif
+
 #include "doki/log.h"
 #include "doki/registry.h"
 #include "doki/theme.h"
@@ -80,12 +88,26 @@ struct doki_plugin_t : public plugmod_t, public doki::IDokiActions
     // any user-supplied custom definitions dropped into
     // $IDAUSR/doki-theme/definitions/; those override catalog entries
     // with the same id (via ThemeRegistry::upsert).
-    size_t loaded = m_registry.load_catalog(doki::catalog_path());
+    size_t loaded = 0;
+
+#if DOKI_HAS_EMBEDDED_CATALOG
+    // Embedded wins: no disk read for the catalog, no on-disk catalog
+    // file is consulted on the success path. The on-disk copy is no
+    // longer deployed (see tools/deploy.ps1 and tools/package.ps1).
+    loaded = m_registry.load_catalog_from_memory(
+        reinterpret_cast<const char *>(doki::theme_catalog_json),
+        doki::theme_catalog_json_len,
+        "embedded theme_catalog.json");
+#else
+    // Local-dev / disabled-embedding path: read the catalog from disk.
+    loaded = m_registry.load_catalog(doki::catalog_path());
+#endif
+
     if ( loaded == 0 )
     {
       // Offline / first-run fallback: legacy hand-maintained bundled
       // definitions under $IDAUSR/doki-theme/definitions/ still work
-      // until the catalog has been deployed.
+      // when embedding is disabled or the embedded blob failed to parse.
       m_registry.load_dir(doki::definitions_dir());
     }
     else

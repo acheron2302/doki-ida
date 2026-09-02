@@ -84,32 +84,33 @@ size_t ThemeRegistry::load_dir(const std::string &dir)
   return ok;
 }
 
-// ----- load_catalog ---------------------------------------------------------
-size_t ThemeRegistry::load_catalog(const std::string &path)
+// ----- load_catalog_from_memory --------------------------------------------
+size_t ThemeRegistry::load_catalog_from_memory(const char *json_data,
+                                               std::size_t   json_len,
+                                               const char   *source_name)
 {
   m_themes.clear();
 
-  std::ifstream ifs(path, std::ios::binary);
-  if ( !ifs )
+  if ( json_data == nullptr || json_len == 0 )
   {
-    doki::msg_log("catalog not found: %s\n", path.c_str());
+    doki::msg_log("catalog: in-memory data is empty (%s)\n", source_name);
     return 0;
   }
 
   nlohmann::json j;
   try
   {
-    ifs >> j;
+    j = nlohmann::json::parse(json_data, json_data + json_len);
   }
   catch ( const std::exception &e )
   {
-    doki::msg_log("catalog: JSON parse error: %s\n", e.what());
+    doki::msg_log("catalog: JSON parse error (%s): %s\n", source_name, e.what());
     return 0;
   }
 
   if ( !j.is_object() )
   {
-    doki::msg_log("catalog: top-level JSON is not an object\n");
+    doki::msg_log("catalog: top-level JSON is not an object (%s)\n", source_name);
     return 0;
   }
 
@@ -117,14 +118,15 @@ size_t ThemeRegistry::load_catalog(const std::string &path)
   int schema = j.value("source", nlohmann::json::object()).value("schemaVersion", 0);
   if ( schema != 1 )
   {
-    doki::msg_log("catalog: unsupported schemaVersion %d (expected 1)\n", schema);
+    doki::msg_log("catalog: unsupported schemaVersion %d (expected 1) in %s\n",
+                  schema, source_name);
     return 0;
   }
 
   const nlohmann::json &themes = j["themes"];
   if ( !themes.is_array() )
   {
-    doki::msg_log("catalog: 'themes' is not an array\n");
+    doki::msg_log("catalog: 'themes' is not an array (%s)\n", source_name);
     return 0;
   }
 
@@ -146,7 +148,7 @@ size_t ThemeRegistry::load_catalog(const std::string &path)
     }
     else
     {
-      doki::msg_log("catalog: skipping theme (%s)\n", err.c_str());
+      doki::msg_log("catalog: skipping theme in %s (%s)\n", source_name, err.c_str());
     }
   }
 
@@ -162,13 +164,29 @@ size_t ThemeRegistry::load_catalog(const std::string &path)
               return a.id < b.id;
             });
 
-  size_t ok = parsed.size();
-  size_t bad = themes.size() - ok;
+  std::size_t ok = parsed.size();
+  std::size_t bad = themes.size() - ok;
   m_themes = std::move(parsed);
 
-  doki::msg_log("loaded %u theme(s) from catalog %s (%u skipped)\n",
-                (uint)ok, path.c_str(), (uint)bad);
+  doki::msg_log("loaded %u theme(s) from %s (%u skipped)\n",
+                (uint)ok, source_name, (uint)bad);
   return ok;
+}
+
+// ----- load_catalog ---------------------------------------------------------
+size_t ThemeRegistry::load_catalog(const std::string &path)
+{
+  std::ifstream ifs(path, std::ios::binary);
+  if ( !ifs )
+  {
+    doki::msg_log("catalog not found: %s\n", path.c_str());
+    return 0;
+  }
+
+  // Read entire file into memory and delegate to the in-memory parser.
+  std::string json_text((std::istreambuf_iterator<char>(ifs)),
+                         std::istreambuf_iterator<char>());
+  return load_catalog_from_memory(json_text.data(), json_text.size(), path.c_str());
 }
 
 // ----- get ------------------------------------------------------------------

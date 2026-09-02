@@ -1,9 +1,8 @@
 # Build (optional) + deploy the plugin and its assets for local testing.
 #
-#   tools\deploy.ps1                          # deploy DLL + catalog
+#   tools\deploy.ps1                          # deploy DLL (+ libcurl if -CurlDir)
 #   tools\deploy.ps1 -Build                   # cmake --build first
 #   tools\deploy.ps1 -DeployToIdaSdkPlugins   # also copy DLL to $env:IDASDK\plugins
-#   tools\deploy.ps1 -SkipCatalog             # do not regenerate theme_catalog.json
 #   tools\deploy.ps1 -CurlDir <path>          # optional libcurl distribution root/bin
 #                                             # to copy libcurl + common TLS deps from.
 #                                             # Defaults to $env:DOKI_CURL_DIR.
@@ -11,13 +10,15 @@
 # Stages:
 #   <IDADIR>\plugins\doki_theme.dll
 #   <IDADIR>\plugins\libcurl*.dll              (if -CurlDir / $DOKI_CURL_DIR is provided)
-#   $IDAUSR\doki-theme\theme_catalog.json
 #   [$env:IDASDK\plugins\doki_theme.dll] (only with -DeployToIdaSdkPlugins)
+#
+# The theme catalog is embedded into the plugin DLL by CMake (see
+# cmake/embed_file.cmake, DOKI_EMBED_CATALOG=ON) and is no longer
+# deployed as a separate file.
 #
 # Sticker and wallpaper assets are downloaded on demand from the
 # doki-theme CDN (see src/doki/assets.cpp) and cached under
 # $IDAUSR\doki-theme\cache\. No image files are bundled with the plugin.
-param(
     [switch]$Build,
     [switch]$DeployToIdaSdkPlugins,
     [switch]$SkipCatalog,
@@ -86,19 +87,7 @@ if ($DeployToIdaSdkPlugins) {
   Write-Output "deployed DLL -> $sdkPlugins"
 }
 
-# Regenerate the theme catalog from the snapshotted upstream
-# definitions. This is the runtime source of truth: the plugin loads
-# the catalog instead of scanning a per-theme definitions/ folder.
-if (-not $SkipCatalog) {
-  & (Join-Path $repoRoot "tools\generate_theme_catalog.ps1") | Out-Null
-  if ($LASTEXITCODE -ne 0) {
-    throw "generate_theme_catalog.ps1 failed"
-  }
-}
+# The theme catalog is embedded into the plugin DLL by CMake at build
+# time (see cmake/embed_file.cmake, DOKI_EMBED_CATALOG=ON). It is no
+# longer deployed to $IDAUSR\doki-theme\.
 
-$root     = Join-Path $idausr "doki-theme"
-$catalog  = Join-Path $root   "theme_catalog.json"
-New-Item -ItemType Directory -Force $root | Out-Null
-Copy-Item (Join-Path $repoRoot "generated\theme_catalog.json") $catalog -Force
-Write-Output "deployed catalog -> $catalog"
-Write-Output "sticker/wallpaper assets will be fetched from the doki-theme CDN on first use."

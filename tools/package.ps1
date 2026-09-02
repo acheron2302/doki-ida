@@ -4,33 +4,23 @@
 #   dist/doki-theme-ida/
 #     plugins/doki_theme.dll
 #     plugins/libcurl*.dll               (when -CurlDir is supplied)
-#     doki-theme/theme_catalog.json
 #     ida-plugin.json
-#     INSTALL.md
 #
 # Sticker and wallpaper assets are downloaded on demand from the
 # doki-theme CDN (see src/doki/assets.cpp) and cached under
 # $IDAUSR\doki-theme\cache\. They are NOT bundled in this package.
 #
-# Theme metadata is shipped as a single generated/theme_catalog.json
-# (see tools/generate_theme_catalog.ps1); no per-theme definition
-# files are needed.
+# Theme metadata is no longer a separate shipped file: the catalog is
+# embedded into the plugin DLL at build time by CMake
+# (see cmake/embed_file.cmake, DOKI_EMBED_CATALOG=ON).
 #
 # Flags:
-#   -RegenerateCatalog  : always re-run generate_theme_catalog.ps1
-#                         (requires the gitignored upstream snapshot
-#                         under third_party/). Default behavior is to
-#                         reuse the committed generated/theme_catalog.json
-#                         so a clean clone can package without
-#                         fetch_upstream.ps1.
 #   -CurlDir <path>     : optional libcurl distribution root/bin to copy
-#                         libcurl + common TLS deps from. Defaults to
 #                         $env:DOKI_CURL_DIR.
+
 param(
     [string]$Version = "0.1.0",
     [string]$DllPath = "",
-    [string]$CatalogPath = "",
-    [switch]$RegenerateCatalog,
     [string]$CurlDir = ""
 )
 
@@ -38,28 +28,8 @@ $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $stage = Join-Path $repoRoot "dist\doki-theme-ida"
 $zip   = Join-Path $repoRoot "dist\doki-theme-ida-$Version.zip"
-
-# Use the committed generated/theme_catalog.json by default so a clean
-# clone can package without first running fetch_upstream.ps1 (which
-# requires a network roundtrip and a gitignored snapshot tree).
-$committedCatalog = Join-Path $repoRoot "generated\theme_catalog.json"
-if (-not $CatalogPath) {
-    if ($RegenerateCatalog) {
-        & (Join-Path $repoRoot "tools\generate_theme_catalog.ps1") | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "generate_theme_catalog.ps1 failed" }
-        $CatalogPath = $committedCatalog
-    } elseif (Test-Path $committedCatalog) {
-        $CatalogPath = $committedCatalog
-        Write-Output "using committed catalog: $CatalogPath"
-    } else {
-        throw "no catalog found. Either commit generated\theme_catalog.json, " +
-              "or pass -RegenerateCatalog (requires third_party\doki-master-theme " +
-              "populated by tools\fetch_upstream.ps1)."
-    }
-}
-if (-not (Test-Path $CatalogPath)) { throw "catalog not found: $CatalogPath" }
-
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+
 New-Item -ItemType Directory -Force `
   (Join-Path $stage "plugins"),
   (Join-Path $stage "doki-theme") | Out-Null
@@ -82,7 +52,6 @@ if ($DllPath) {
 if (-not $dll) { throw "doki_theme.dll not found - build first." }
 
 Copy-Item $dll                                       (Join-Path $stage "plugins")
-Copy-Item $CatalogPath                               (Join-Path $stage "doki-theme\theme_catalog.json")
 Copy-Item (Join-Path $repoRoot "ida-plugin.json")    $stage
 Copy-Item (Join-Path $repoRoot "INSTALL.md")         $stage
 # Keep attribution in the package even though bundled images are gone.

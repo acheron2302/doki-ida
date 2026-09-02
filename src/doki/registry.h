@@ -34,6 +34,14 @@ public:
   // loaded themes first.
   size_t load_catalog(const std::string &path);
 
+  // Load a catalog from an in-memory JSON blob. Same semantics as
+  // load_catalog(const std::string&) but accepts the JSON text directly,
+  // which is how the embedded theme_catalog_json byte array is consumed.
+  // source_name is only used for the success/skip log line.
+  size_t load_catalog_from_memory(const char *json_data,
+                                  std::size_t   json_len,
+                                  const char   *source_name = "embedded catalog");
+
   // Scan dir for "*.master.definition.json" (and "*.json") and load
   // each. Used for user-supplied custom definitions and for tests.
   // Malformed files are skipped with a logged warning. Returns the
