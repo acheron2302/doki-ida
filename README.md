@@ -75,12 +75,7 @@ project build (it contains the plugin DLL and the generated theme catalog).
    - the IDA install dir: `<IDADIR>\plugins\`, or
    - your user dir: `%APPDATA%\Hex-Rays\IDA Pro\plugins\` (the `$IDAUSR`
      user directory).
-2. Copy the catalog file `doki-theme\theme_catalog.json` to:
-   ```
-   %APPDATA%\Hex-Rays\IDA Pro\doki-theme\theme_catalog.json
-   ```
-   (i.e. `$IDAUSR\doki-theme\theme_catalog.json`).
-3. Start IDA and open a database. The plugin's menu actions appear under
+2. Start IDA and open a database. The plugin's menu actions appear under
    the **Options** menu.
 
 **First-use asset download**
