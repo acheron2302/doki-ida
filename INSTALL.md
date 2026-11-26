@@ -6,23 +6,16 @@
   work offline from the local cache).
 
 ## Install
+**Install from the release ZIP**
 1. Copy `plugins\doki_theme.dll` into your IDA `plugins` directory, either:
    - the IDA install dir: `<IDADIR>\plugins\`, or
    - your user dir: `%APPDATA%\Hex-Rays\IDA Pro\plugins\` (`$IDAUSR`).
-2. Copy the `doki-theme\theme_catalog.json` file into your user dir:
-   ```
-   %APPDATA%\Hex-Rays\IDA Pro\
-     plugins\doki_theme.dll           (if you chose the user dir)
-     doki-theme\theme_catalog.json
-   ```
-   The catalog is a single JSON file that lists every official doki
-   theme (with its colors, stickers, and transparent wallpapers). It
-   is generated at build time from upstream definitions; see
-   [README.md](README.md#how-it-works) for how to refresh it.
+   The theme catalog is embedded in the DLL, so there is no separate
+   `theme_catalog.json` to install.
 
    Sticker and wallpaper images are NOT shipped in the package; the plugin
    downloads them on first use.
-3. Start IDA and open a database.
+2. Start IDA and open a database.
 
 ## First-use asset download
 The first time you apply a character, the plugin downloads its sticker

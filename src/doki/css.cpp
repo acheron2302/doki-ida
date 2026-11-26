@@ -3,6 +3,7 @@
 //----------------------------------------------------------------------------
 #include "doki/css.h"
 
+#include <cstdio>
 #include <sstream>
 
 namespace doki
@@ -26,6 +27,17 @@ static std::string anchor_to_position(const std::string &anchor)
   return "bottom right"; // default for a corner mascot
 }
 
+// Keep definition-supplied text from terminating the generated CSS comment.
+static std::string css_comment_safe(std::string s)
+{
+  for ( size_t pos = 0; (pos = s.find("*/", pos)) != std::string::npos; )
+    s.replace(pos, 2, "* /");
+  for ( char &c : s )
+    if ( c == '\n' || c == '\r' )
+      c = ' ';
+  return s;
+}
+
 std::string generate_theme_css(const DokiThemeDefinition &def,
                                const IdaPalette &pal,
                                const CssOptions &opt)
@@ -42,8 +54,13 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   // transparent so the image shows through.
   const bool transparent_bg = wall;
 
-  o << "/* doki-theme: " << def.displayName
-    << " (" << def.group << ") - generated, do not edit by hand */\n";
+  o << "/* doki-theme: " << css_comment_safe(def.displayName)
+    << " (" << css_comment_safe(def.group)
+    << ") - generated, do not edit by hand */\n";
+  // Bump this marker whenever the generated CSS changes in a way that
+  // installed themes must pick up. plugin.cpp compares it against
+  // kCssMigrationMarker to regenerate stale theme.css files in place.
+  o << "/* doki-css-revision: 2 */\n";
   o << "@importtheme \"" << base << "\";\n\n";
 
   // Palette variables.
@@ -78,10 +95,12 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   o << "@def doki_surface      " << to_css_hex(pal.surface_alt)       << ";\n";
   o << "@def doki_surface_hi   " << to_css_hex(pal.surface_raised)    << ";\n";
   o << "@def doki_sel_fg       " << to_css_hex(pal.selection_fg)      << ";\n";
-  o << "@def doki_search_fg    " << to_css_hex(pal.search_fg)         << ";\n";
   o << "@def doki_addr_expr    " << to_css_hex(pal.addr_expr)         << ";\n";
   o << "@def doki_patched      " << to_css_hex(pal.patched_bytes)     << ";\n";
   o << "@def doki_unsaved      " << to_css_hex(pal.unsaved_changes)   << ";\n";
+  o << "@def doki_accent_contrast " << to_css_hex(pal.accent_contrast) << ";\n";
+  o << "@def doki_hl1          " << to_css_rgba(pal.highlight[0])     << ";\n";
+  o << "@def doki_hl2          " << to_css_rgba(pal.highlight[1])     << ";\n";
   o << "@def doki_hl3          " << to_css_rgba(pal.highlight[2])     << ";\n";
   o << "@def doki_hl4          " << to_css_rgba(pal.highlight[3])     << ";\n";
   o << "@def doki_hl5          " << to_css_rgba(pal.highlight[4])     << ";\n";
@@ -90,7 +109,6 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   o << "@def doki_hl8          " << to_css_rgba(pal.highlight[7])     << ";\n";
   o << "@def doki_diff_ins     " << to_css_rgba(pal.diff_inserted)    << ";\n";
   o << "@def doki_diff_del     " << to_css_rgba(pal.diff_deleted)     << ";\n";
-  o << "@def doki_diff_mod     " << to_css_rgba(pal.diff_modified)    << ";\n";
   o << "@def doki_diff_conf    " << to_css_rgba(pal.diff_conflict)    << ";\n";
   o << "@def doki_graph_title  " << to_css_hex(pal.graph_title_normal) << ";\n";
   o << "@def doki_graph_sel    " << to_css_hex(pal.graph_title_selected) << ";\n";
@@ -108,6 +126,11 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   o << "QWidget\n{\n";
   o << "    background-color: ${doki_window_bg};\n";
   o << "    color: ${doki_fg};\n";
+  o << "}\n\n";
+  o << "/* The Doki sticker overlay is a QWidget; keep it fully transparent. */\n";
+  o << "QWidget#doki_sticker_overlay\n{\n";
+  o << "    background: transparent;\n";
+  o << "    border: none;\n";
   o << "}\n\n";
 
   o << "QTextEdit, QPlainTextEdit\n{\n";
@@ -183,7 +206,7 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   // wallpaper is layered behind the listing, the per-line background must
   // be transparent so the image shows through.
   // See https://hex-rays.com/blog/ui-candy for the official approach.
-  o << "CustomIDAMemo\n{\n";
+  o << "CustomIDAMemo,\nCustomIDAMemo[os-dark-theme=\"true\"]\n{\n";
   if ( transparent_bg )
     o << "    qproperty-line-bg-default            : " << rgba_alpha(pal.lst_bg, 0.0) << ";\n";
   else
@@ -246,7 +269,6 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   o << "    qproperty-line-fg-alt-opnd           : ${doki_fg};\n";
   o << "    qproperty-line-fg-void-opnd          : ${doki_error};\n";
   o << "    qproperty-line-fg-error              : ${doki_error};\n";
-  o << "    qproperty-line-fg-lumina             : ${doki_success};\n";
 
   // ── prefix/gutter roles ──
   o << "    qproperty-line-pfx-libfunc           : " << to_css_hex(pal.pfx_libfunc) << ";\n";
@@ -265,9 +287,8 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   // ── highlight backgrounds (8 user highlight slots) ──
   // Theme slots 1 and 2; slots 3-8 keep base defaults (would otherwise
   // inherit the stock yellow, which clashes with dark themes).
-  o << "    qproperty-line-bg-highlight          : ${doki_search_bg};\n";
-  o << "    qproperty-line-fg-highlight          : ${doki_search_fg};\n";
-  o << "    qproperty-line-bg-highlight-2        : ${doki_ident_hi};\n";
+  o << "    qproperty-line-bg-highlight          : ${doki_hl1};\n";
+  o << "    qproperty-line-bg-highlight-2        : ${doki_hl2};\n";
   o << "    qproperty-line-bg-highlight-3        : ${doki_hl3};\n";
   o << "    qproperty-line-bg-highlight-4        : ${doki_hl4};\n";
   o << "    qproperty-line-bg-highlight-5        : ${doki_hl5};\n";
@@ -284,10 +305,12 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   o << "    qproperty-bookmark-star-outline      : ${doki_warning};\n";
   for ( int i = 0; i < 16; ++i )
     o << "    qproperty-line-bgovl-extra-" << (i + 1) << "        : " << to_css_rgba(pal.ovl_extra[i]) << ";\n";
-  o << "    qproperty-line-bgovl-diff-ins        : ${doki_diff_ins};\n";
-  o << "    qproperty-line-bgovl-diff-del        : ${doki_diff_del};\n";
-  o << "    qproperty-line-bgovl-diff-mod        : ${doki_diff_mod};\n";
-  o << "    qproperty-line-bgovl-diff-conflict   : ${doki_diff_conf};\n";
+  o << "    qproperty-line-bgovl-diff-region-pick : ${doki_diff_ins};\n";
+  o << "    qproperty-line-bgovl-diff-region-leave : ${doki_diff_del};\n";
+  o << "    qproperty-line-bgovl-diff-region-conflict : ${doki_diff_conf};\n";
+  o << "    qproperty-line-bgovl-diff-region-pick-current : ${doki_diff_ins};\n";
+  o << "    qproperty-line-bgovl-diff-region-leave-current : ${doki_diff_del};\n";
+  o << "    qproperty-line-bgovl-diff-region-conflict-current : ${doki_diff_conf};\n";
 
   // ── current-item prefix (identifierHighlight, thin bar) ──
   o << "    qproperty-line-pfx-current-item      : ${doki_ident_hi};\n";
@@ -306,7 +329,7 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   o << "    qproperty-line-fg-deref-writable-code: ${doki_keyword};\n";
 
   // ── graph view (Phase 4) ──
-  o << "    qproperty-graph-bg-top               : ${doki_bg};\n";
+  o << "    qproperty-graph-bg-top               : " << to_css_hex(pal.graph_bg_top) << ";\n";
   o << "    qproperty-graph-bg-bottom            : " << to_css_hex(pal.graph_bg_bottom) << ";\n";
   o << "    qproperty-graph-node-title-normal    : ${doki_graph_title};\n";
   o << "    qproperty-graph-node-title-selected  : ${doki_graph_sel};\n";
@@ -317,8 +340,8 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   o << "    qproperty-graph-node-high1           : " << to_css_rgba(pal.graph_high1) << ";\n";
   o << "    qproperty-graph-node-high2           : " << to_css_rgba(pal.graph_high2) << ";\n";
   o << "    qproperty-graph-node-foreign         : " << to_css_hex(pal.graph_foreign) << ";\n";
-  o << "    qproperty-graph-edge-normal          : ${doki_eaccent};\n";
-  o << "    qproperty-graph-edge-yes             : ${doki_eaccent};\n";
+  o << "    qproperty-graph-edge-normal          : " << to_css_hex(pal.graph_edge_normal) << ";\n";
+  o << "    qproperty-graph-edge-yes             : " << to_css_hex(pal.graph_edge_yes) << ";\n";
   o << "    qproperty-graph-edge-no              : " << to_css_hex(pal.graph_edge_no) << ";\n";
   o << "    qproperty-graph-edge-high            : " << to_css_hex(pal.graph_edge_high) << ";\n";
   o << "    qproperty-graph-edge-selected        : " << to_css_hex(pal.graph_edge_selected) << ";\n";
@@ -332,7 +355,7 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
     // Hex-Rays blog approach. Both disassembly and pseudocode listings use
     // CustomIDAMemo, so a single rule covers both views. The sticker is
     // drawn by the Qt overlay on top, so it doesn't compete with CSS.
-    o << "\n    background            : ${doki_bg} url(\"$RELPATH/"
+    o << "\n    background-image      : url(\"$RELPATH/"
       << opt.wallpaper_file << "\");\n";
     o << "    background-repeat     : no-repeat;\n";
     o << "    background-position   : " << anchor_to_position(opt.wallpaper_anchor) << ";\n";
@@ -349,16 +372,17 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   o << "    qproperty-graph-node-frame-selected  : ${doki_graph_frame};\n";
   o << "}\n\n";
 
-  o << "CustomIDAMemo[debugging=\"true\"]\n{\n";
+  o << "CustomIDAMemo[debugging=\"true\"],\n";
+  o << "CustomIDAMemo[os-dark-theme=\"true\"][debugging=\"true\"]\n{\n";
   o << "    qproperty-line-bg-default            : ${doki_bg};\n";
   o << "    qproperty-line-bgovl-current-ip      : ${doki_warning};\n";
   o << "}\n\n";
 
-  o << "CustomIDAMemo[hints=\"true\"]\n{\n";
+  o << "CustomIDAMemo[hints=\"true\"],\n";
+  o << "CustomIDAMemo[os-dark-theme=\"true\"][hints=\"true\"]\n{\n";
   o << "    qproperty-line-bg-default            : ${doki_surface};\n";
   o << "    qproperty-line-fg-default            : ${doki_fg};\n";
-  o << "    qproperty-hint-bg                    : ${doki_surface_hi};\n";
-  o << "    qproperty-hint-caption-fg            : ${doki_sel_fg};\n";
+  o << "    qproperty-hint-caption-fg            : ${doki_accent_contrast};\n";
   o << "    qproperty-hint-caption-bg            : ${doki_eaccent};\n";
   o << "}\n\n";
 
@@ -391,7 +415,7 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   // Navigation band: per-type colors (Phase 8). Per-range gradient colors
   // are still painted by the C++ colorizer in apply.cpp; this CSS block
   // ensures the block-color fallback is themed too.
-  o << "navband_t\n{\n";
+  o << "navband_t,\nnavband_t[os-dark-theme=\"true\"]\n{\n";
   o << "    background-color       : ${doki_bg};\n";
   o << "    qproperty-function     : " << to_css_hex(pal.nav_function) << ";\n";
   o << "    qproperty-lib-function : " << to_css_hex(pal.nav_lib_function) << ";\n";
@@ -399,7 +423,7 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   o << "    qproperty-data         : " << to_css_hex(pal.nav_data) << ";\n";
   o << "    qproperty-undefined    : " << to_css_hex(pal.nav_undefined) << ";\n";
   o << "    qproperty-extern       : " << to_css_hex(pal.nav_extern) << ";\n";
-  o << "    qproperty-lumina-function : " << to_css_hex(pal.nav_lumina_function) << ";\n";
+  o << "    qproperty-lumina-function : ${doki_success};\n";
   o << "    qproperty-hl-function  : " << to_css_hex(pal.nav_hl_function) << ";\n";
   o << "    qproperty-hl-lib-function : " << to_css_hex(pal.nav_hl_lib_function) << ";\n";
   o << "    qproperty-hl-code      : " << to_css_hex(pal.nav_hl_code) << ";\n";
@@ -422,7 +446,7 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
 
   // Hex-Rays pseudocode / text-area colors. The qproperty-* keys map to
   // the fields exposed by text_area_t.
-  o << "text_area_t\n{\n";
+  o << "text_area_t,\ntext_area_t[os-dark-theme=\"true\"]\n{\n";
   o << "    qproperty-keyword1-fg     : ${doki_keyword};\n";
   o << "    qproperty-keyword2-fg     : ${doki_eaccent};\n";
   o << "    qproperty-keyword3-fg     : ${doki_number};\n";
@@ -434,17 +458,17 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   o << "    qproperty-user2-fg        : ${doki_name};\n";
   o << "    qproperty-user3-fg        : ${doki_register};\n";
   o << "    qproperty-user4-fg        : ${doki_eaccent};\n";
-  o << "    qproperty-keyword1-weight : 75;\n";
-  o << "    qproperty-keyword2-weight : 75;\n";
-  o << "    qproperty-keyword3-weight : 75;\n";
-  o << "    qproperty-string-weight   : 50;\n";
-  o << "    qproperty-comment-italic  : true;\n";
-  o << "    qproperty-preprocessor-weight : 75;\n";
-  o << "    qproperty-number-weight   : 75;\n";
-  o << "    qproperty-user1-weight    : 50;\n";
-  o << "    qproperty-user2-weight    : 50;\n";
-  o << "    qproperty-user3-weight    : 50;\n";
-  o << "    qproperty-user4-weight    : 50;\n";
+  o << "    qproperty-keyword1-weight : 1;\n";
+  o << "    qproperty-keyword2-weight : 1;\n";
+  o << "    qproperty-keyword3-weight : 1;\n";
+  o << "    qproperty-string-weight   : 0;\n";
+  o << "    qproperty-comment-italic  : 1;\n";
+  o << "    qproperty-preprocessor-weight : 1;\n";
+  o << "    qproperty-number-weight   : 1;\n";
+  o << "    qproperty-user1-weight    : 0;\n";
+  o << "    qproperty-user2-weight    : 0;\n";
+  o << "    qproperty-user3-weight    : 0;\n";
+  o << "    qproperty-user4-weight    : 0;\n";
   o << "    qproperty-match-line-bg   : " << rgba_alpha(pal.search_bg, 0.25) << ";\n";
   o << "    qproperty-match-text-bg   : ${doki_search_bg};\n";
   o << "}\n\n";
@@ -463,7 +487,7 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   // Decompiler semantic colors exposed via syntax_color_t. These cover the
   // distinct categories Hex-Rays emits (function names, library funcs,
   // imports, data references, etc.).
-  o << "syntax_color_t\n{\n";
+  o << "syntax_color_t,\nsyntax_color_t[os-dark-theme=\"true\"]\n{\n";
   o << "    qproperty-function-name-color        : ${doki_name};\n";
   o << "    qproperty-library-function-color     : ${doki_name};\n";
   o << "    qproperty-imported-function-color    : ${doki_info};\n";
@@ -493,7 +517,7 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   o << "}\n\n";
 
   // CPU register pane (Phase 8).
-  o << "TCpuRegs\n{\n";
+  o << "TCpuRegs,\nTCpuRegs[os-dark-theme=\"true\"]\n{\n";
   o << "    background-color                  : " << to_css_hex(pal.secondary_bg) << ";\n";
   o << "    qproperty-register-defined        : ${doki_fg};\n";
   o << "    qproperty-register-changed        : ${doki_eaccent};\n";
@@ -502,7 +526,7 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   o << "}\n\n";
 
   o << "TCpuRegs[os-dark-theme=\"true\"]\n{\n";
-  o << "    background-color                  : ${doki_surface};\n";
+  o << "    background-color                  : ${doki_surface_hi};\n";
   o << "    qproperty-register-changed        : ${doki_eaccent};\n";
   o << "}\n\n";
 
@@ -512,14 +536,15 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
 
   o << "TCpuRegs QPushButton\n{\n    background-color: transparent;\n}\n\n";
 
-  o << "chooser_widget_t, standalone_dirtree_widget_t\n{\n";
-  o << "    qproperty-highlight-default      : " << to_css_rgba(pal.chooser_highlight) << ";\n";
-  o << "    qproperty-highlight-selected     : " << to_css_hex(pal.chooser_highlight_selected) << ";\n";
-  o << "    qproperty-cut-text-default       : " << to_css_hex(pal.chooser_cut) << ";\n";
-  o << "    qproperty-cut-text-selected      : " << to_css_hex(pal.chooser_cut_selected) << ";\n";
+  o << "chooser_widget_t, standalone_dirtree_widget_t,\n";
+  o << "chooser_widget_t[os-dark-theme=\"true\"], standalone_dirtree_widget_t[os-dark-theme=\"true\"]\n{\n";
+  o << "    qproperty-highlight-bg-default      : " << to_css_rgba(pal.chooser_highlight) << ";\n";
+  o << "    qproperty-highlight-bg-selected     : " << to_css_hex(pal.chooser_highlight_selected) << ";\n";
+  o << "    qproperty-cut-text-color-default    : " << to_css_hex(pal.chooser_cut) << ";\n";
+  o << "    qproperty-cut-text-color-selected   : " << to_css_hex(pal.chooser_cut_selected) << ";\n";
   o << "}\n\n";
 
-  o << "log_widget_t\n{\n";
+  o << "log_widget_t,\nlog_widget_t[os-dark-theme=\"true\"]\n{\n";
   o << "    color: " << to_css_hex(pal.log_fg) << ";\n";
   o << "    background-color: " << to_css_hex(pal.log_bg) << ";\n";
   o << "}\n\n";
@@ -527,41 +552,69 @@ std::string generate_theme_css(const DokiThemeDefinition &def,
   // IDA 9.4 dark/theme.css defines xref_tree_t with qproperty-tree-background-color
 // and qproperty-search-match-color (not qproperty-tree-bg / qproperty-search-match).
 // Cross-checked against D:\tools\IDA 9.4\themes\dark\theme.css lines 607-611.
-o << "xref_tree_t\n{\n";
+o << "xref_tree_t,\nxref_tree_t[os-dark-theme=\"true\"]\n{\n";
   o << "    qproperty-tree-background-color : " << to_css_hex(pal.xref_bg) << ";\n";
   o << "    qproperty-search-match-color    : " << rgba_alpha(pal.xref_search, 0.80) << ";\n";
   o << "}\n\n";
-
-  o << "JumpAnywhereDialog\n{\n";
-  o << "    background-color: " << to_css_hex(pal.jump_bg) << ";\n";
+  // The imported light theme styles xref selections itself; override both
+  // the normal and OS-dark variants so the Doki selection palette wins.
+  o << "xref_tree_t QTreeView::item:selected,\n";
+  o << "xref_tree_t QTreeView::branch:selected,\n";
+  o << "xref_tree_t[os-dark-theme=\"true\"] QTreeView::item:selected,\n";
+  o << "xref_tree_t[os-dark-theme=\"true\"] QTreeView::branch:selected\n{\n";
+  o << "    background-color: " << to_css_hex(pal.xref_selected) << ";\n";
+  o << "    color: " << to_css_hex(pal.selection_fg) << ";\n";
   o << "}\n\n";
-  o << "JumpAnywhereDialog QListView::item:selected\n{\n";
-  o << "    background: " << to_css_hex(pal.jump_selected_bg) << ";\n";
-  o << "    color: " << to_css_hex(pal.jump_selected_fg) << ";\n";
+
+  o << "JumpAnywhereDialog QListView,\n";
+  o << "JumpAnywhereDialog[os-dark-theme=\"true\"] QListView\n{\n";
+  o << "    background-color: " << to_css_hex(pal.jump_bg) << ";\n";
+  o << "    selection-background-color: " << to_css_hex(pal.jump_selected_bg) << ";\n";
+  o << "    selection-color: " << to_css_hex(pal.jump_selected_fg) << ";\n";
   o << "}\n\n";
   o << "JumpAnywhereDialog QToolButton:hover\n{\n    background: " << to_css_rgba(pal.jump_button_hover) << ";\n}\n\n";
-  o << "JumpAnywhereDialog QToolButton:checked\n{\n    background: " << to_css_rgba(pal.jump_button_checked) << ";\n}\n\n";
+  o << "JumpAnywhereDialog QToolButton:checked,\n";
+  o << "JumpAnywhereDialog[os-dark-theme=\"true\"] QToolButton:checked,\n";
+  o << "JumpAnywhereDialog QToolButton[current=\"true\"],\n";
+  o << "JumpAnywhereDialog[os-dark-theme=\"true\"] QToolButton[current=\"true\"]\n";
+  o << "{\n    background: " << to_css_rgba(pal.jump_button_checked) << ";\n}\n\n";
 
   o << "StyledQListView\n{\n    qproperty-query-annotation-color: ${doki_comment};\n}\n\n";
 
   o << "GraphMiniView\n{\n";
-  o << "    qproperty-fog-color        : " << to_css_rgba(pal.graph_mini_fog) << ";\n";
-  o << "    qproperty-crosshair-color  : " << to_css_hex(pal.graph_mini_crosshair) << ";\n";
+  o << "    qproperty-fog        : " << to_css_rgba(pal.graph_mini_fog) << ";\n";
+  o << "    qproperty-crosshairs : " << to_css_rgba(pal.graph_mini_crosshair) << ";\n";
   o << "}\n\n";
 
-  o << "TChooser, diff_fringe_t\n{\n";
-  o << "    qproperty-diff-inserted       : ${doki_diff_ins};\n";
-  o << "    qproperty-diff-deleted        : ${doki_diff_del};\n";
-  o << "    qproperty-diff-modified       : ${doki_diff_mod};\n";
-  o << "    qproperty-diff-conflict       : ${doki_diff_conf};\n";
-  o << "    qproperty-diff-pick-current   : " << to_css_rgba(pal.diff_pick) << ";\n";
-  o << "    qproperty-diff-leave-current  : " << to_css_rgba(pal.diff_leave) << ";\n";
-  o << "    qproperty-diff-boundary       : " << to_css_hex(pal.diff_boundary) << ";\n";
+  o << "TChooser\n{\n";
+  o << "    qproperty-highlight-bg-diff-region-pick             : ${doki_diff_ins};\n";
+  o << "    qproperty-highlight-bg-diff-region-leave            : ${doki_diff_del};\n";
+  o << "    qproperty-highlight-bg-diff-region-conflict         : ${doki_diff_conf};\n";
+  o << "    qproperty-highlight-bg-diff-region-pick-current     : ${doki_diff_ins};\n";
+  o << "    qproperty-highlight-bg-diff-region-leave-current    : ${doki_diff_del};\n";
+  o << "    qproperty-highlight-bg-diff-region-conflict-current : ${doki_diff_conf};\n";
   o << "}\n\n";
 
-  o << "pathfinder_t\n{\n";
-  o << "    qproperty-drag-color   : " << to_css_hex(pal.pathfinder_drag) << ";\n";
-  o << "    qproperty-delete-color : " << to_css_hex(pal.pathfinder_delete) << ";\n";
+  o << "diff_fringe_t\n{\n";
+  o << "    background-color : " << to_css_hex(pal.diff_boundary) << ";\n";
+  o << "    qproperty-diff-region-pick                          : ${doki_diff_ins};\n";
+  o << "    qproperty-diff-region-pick-boundaries               : " << to_css_hex(pal.diff_boundary) << ";\n";
+  o << "    qproperty-diff-region-pick-current                  : ${doki_diff_ins};\n";
+  o << "    qproperty-diff-region-pick-current-boundaries       : " << to_css_hex(pal.diff_boundary) << ";\n";
+  o << "    qproperty-diff-region-leave                         : ${doki_diff_del};\n";
+  o << "    qproperty-diff-region-leave-boundaries              : " << to_css_hex(pal.diff_boundary) << ";\n";
+  o << "    qproperty-diff-region-leave-current                 : ${doki_diff_del};\n";
+  o << "    qproperty-diff-region-leave-current-boundaries      : " << to_css_hex(pal.diff_boundary) << ";\n";
+  o << "    qproperty-diff-region-conflict                      : ${doki_diff_conf};\n";
+  o << "    qproperty-diff-region-conflict-boundaries           : " << to_css_hex(pal.diff_boundary) << ";\n";
+  o << "    qproperty-diff-region-conflict-current              : ${doki_diff_conf};\n";
+  o << "    qproperty-diff-region-conflict-current-boundaries   : " << to_css_hex(pal.diff_boundary) << ";\n";
+  o << "}\n\n";
+
+  o << "pathfinder_exclude_list_t, pathfinder_waypoint_tree_t,\n";
+  o << "pathfinder_exclude_list_t[os-dark-theme=\"true\"], pathfinder_waypoint_tree_t[os-dark-theme=\"true\"]\n{\n";
+  o << "    selection-background-color : " << to_css_hex(pal.jump_selected_bg) << ";\n";
+  o << "    selection-color            : " << to_css_hex(pal.jump_selected_fg) << ";\n";
   o << "}\n\n";
 
   // IDA 9.4 dark/theme.css defines xg_view_t with qproperty-edge-default,

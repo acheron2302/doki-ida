@@ -3,9 +3,14 @@
 # Layout (drop the contents into your IDA install dir / $IDAUSR):
 #   dist/doki-theme-ida/
 #     plugins/doki_theme.dll
+#     plugins/ida-plugin.json
 #     plugins/libcurl*.dll               (when -CurlDir is supplied)
-#     ida-plugin.json
+#     INSTALL.md
+#     doki-theme/ATTRIBUTION.md
 #
+# Keeping ida-plugin.json next to the DLL also makes the archive valid for
+# HCLI, which extracts the subdirectory containing the manifest into
+# $IDAUSR/plugins.
 # Sticker and wallpaper assets are downloaded on demand from the
 # doki-theme CDN (see src/doki/assets.cpp) and cached under
 # $IDAUSR\doki-theme\cache\. They are NOT bundled in this package.
@@ -41,8 +46,11 @@ if ($DllPath) {
     if (-not (Test-Path $DllPath)) { throw "-DllPath does not exist: $DllPath" }
     $dll = $DllPath
 } else {
-    $candidates = @(
-        (Join-Path $env:IDASDK "src\bin\plugins\doki_theme.dll"),
+    $candidates = @()
+    if ($env:IDASDK) {
+        $candidates += (Join-Path $env:IDASDK "src\bin\plugins\doki_theme.dll")
+    }
+    $candidates += @(
         (Join-Path $repoRoot "build\output\plugins\doki_theme.dll"),
         (Join-Path $repoRoot "build\Release\doki_theme.dll"),
         (Join-Path $repoRoot "build\bin\plugins\doki_theme.dll")
@@ -52,7 +60,18 @@ if ($DllPath) {
 if (-not $dll) { throw "doki_theme.dll not found - build first." }
 
 Copy-Item $dll                                       (Join-Path $stage "plugins")
-Copy-Item (Join-Path $repoRoot "ida-plugin.json")    $stage
+Copy-Item (Join-Path $repoRoot "ida-plugin.json")    (Join-Path $stage "plugins")
+# Keep the packaged manifest version in sync with the archive version.
+$manifestPath = Join-Path $stage "plugins\ida-plugin.json"
+try {
+  $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+  $manifest.plugin.version = $Version
+  $json = $manifest | ConvertTo-Json -Depth 10
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($manifestPath, $json, $utf8NoBom)
+} catch {
+  throw "cannot update packaged ida-plugin.json: $($_.Exception.Message)"
+}
 Copy-Item (Join-Path $repoRoot "INSTALL.md")         $stage
 # Keep attribution in the package even though bundled images are gone.
 if (Test-Path (Join-Path $repoRoot "assets\ATTRIBUTION.md")) {
@@ -75,7 +94,7 @@ if ($CurlDir -and (Test-Path $CurlDir)) {
   foreach ($root in $curlRoots) {
     foreach ($pattern in $patterns) {
       foreach ($f in (Get-ChildItem -LiteralPath $root -File -Filter $pattern -ErrorAction SilentlyContinue)) {
-        Copy-Item $f.FullName (Join-Path $stage "plugins" $f.Name) -Force
+        Copy-Item $f.FullName (Join-Path (Join-Path $stage "plugins") $f.Name) -Force
         $copied[$f.Name] = $true
       }
     }
@@ -86,11 +105,26 @@ if ($CurlDir -and (Test-Path $CurlDir)) {
     Write-Warning "CurlDir was provided but no libcurl runtime files were found."
   }
 } else {
-  Write-Warning "no libcurl root provided (-CurlDir or $env:DOKI_CURL_DIR). Skipping libcurl staging."
+  Write-Warning 'no libcurl root provided (-CurlDir or $env:DOKI_CURL_DIR). Skipping libcurl staging.'
   Write-Warning "End users need libcurl with HTTPS/TLS support for runtime asset downloads, or can pre-warm the cache with tools\fetch_assets.ps1."
 }
 
 if (Test-Path $zip) { Remove-Item $zip }
-Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip
+# Prefer Windows' bsdtar: Compress-Archive stores backslash separators on
+# Windows, which non-Windows ZIP readers treat as literal filename chars.
+$tarExe = ""
+if ($env:SystemRoot) {
+  $tarExe = Join-Path $env:SystemRoot "System32\tar.exe"
+}
+if ($tarExe -and (Test-Path $tarExe)) {
+  $tarArgs = @('-a', '-c', '-f', $zip, '-C', $stage)
+  foreach ($name in @('plugins', 'doki-theme', 'INSTALL.md')) {
+    if (Test-Path (Join-Path $stage $name)) { $tarArgs += $name }
+  }
+  & $tarExe @tarArgs
+  if ($LASTEXITCODE -ne 0) { throw "tar failed to create $zip (exit $LASTEXITCODE)" }
+} else {
+  Compress-Archive -Path (Join-Path $stage "*") -DestinationPath $zip
+}
 Write-Output "packaged -> $zip"
 Get-ChildItem $stage -Recurse -File | ForEach-Object { "  " + $_.FullName.Replace($stage, "doki-theme-ida") }

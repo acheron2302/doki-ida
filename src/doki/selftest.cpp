@@ -12,6 +12,13 @@
 // Our own doki/log.h pulls pro.h in, so json is included first.
 #include <nlohmann/json.hpp>
 
+#if DOKI_HAS_EMBEDDED_CATALOG
+// Same runtime source of truth as plugin.cpp. Without this the self-test
+// looks only at $IDAUSR/doki-theme/theme_catalog.json, which is no longer
+// deployed now that the catalog is embedded in the DLL.
+#include "theme_catalog_embed.hpp"
+#endif
+
 #include "doki/selftest.h"
 #include "doki/assets.h"
 #include "doki/color.h"
@@ -88,12 +95,27 @@ static bool color_conversion_tests()
   return g_failures == 0;
 }
 
+// Load the same catalog the runtime uses: the embedded blob when available,
+// the on-disk copy otherwise. Returns the number of loaded themes.
+static size_t load_catalog_for_tests(ThemeRegistry &reg)
+{
+#if DOKI_HAS_EMBEDDED_CATALOG
+  size_t loaded = reg.load_catalog_from_memory(
+      reinterpret_cast<const char *>(doki::theme_catalog_json),
+      doki::theme_catalog_json_len,
+      "embedded theme_catalog.json");
+  if ( loaded != 0 )
+    return loaded;
+#endif
+  return reg.load_catalog(catalog_path());
+}
+
 static void load_registry_with_fallback(ThemeRegistry &reg)
 {
   // Prefer the deployed catalog; fall back to the legacy
   // definitions/ directory when the catalog is missing (e.g. local
   // development without an explicit deploy).
-  if ( reg.load_catalog(catalog_path()) == 0 )
+  if ( load_catalog_for_tests(reg) == 0 )
   {
     doki::msg_log("  catalog not deployed, falling back to %s\n",
                   definitions_dir().c_str());
@@ -251,7 +273,7 @@ static void echidna_specific_test()
   doki::msg_log("echidna invariants:\n");
 
   ThemeRegistry reg;
-  if ( reg.load_catalog(catalog_path()) == 0 )
+  if ( load_catalog_for_tests(reg) == 0 )
   {
     doki::msg_log("  (catalog not deployed; skipping Echidna spot-check)\n");
     return;
@@ -472,7 +494,7 @@ static void catalog_invariants_test()
   doki::msg_log("catalog invariants:\n");
 
   ThemeRegistry reg;
-  size_t loaded = reg.load_catalog(catalog_path());
+  size_t loaded = load_catalog_for_tests(reg);
   if ( loaded == 0 )
   {
     doki::msg_log("  (no catalog deployed; skipping catalog-level invariants)\n");
@@ -547,7 +569,7 @@ static void known_themes_test()
   doki::msg_log("known themes:\n");
 
   ThemeRegistry reg;
-  if ( reg.load_catalog(catalog_path()) == 0 ) return;
+  if ( load_catalog_for_tests(reg) == 0 ) return;
 
   struct Probe
   {
@@ -617,6 +639,12 @@ static void asset_manager_tests()
   CHECK(!is_valid_remote_path(AssetKind::Sticker,
                               "stickers/../etc/passwd"),
         "traversal rejected\n");
+  CHECK(is_valid_remote_path(AssetKind::Sticker,
+                             "stickers/vscode/a..b.png"),
+        "internal double dots in a file name allowed\n");
+  CHECK(!is_valid_remote_path(AssetKind::Sticker,
+                              "stickers/vscode/./a.png"),
+        "single-dot path segment rejected\n");
   CHECK(!is_valid_remote_path(AssetKind::Sticker,
                               "stickers\\windows\\path.png"),
         "backslash rejected\n");
@@ -650,8 +678,14 @@ static void asset_manager_tests()
         "wallpaper cache path = $IDAUSR/doki-theme/cache/wallpapers/rem.png\n");
   CHECK(cache_file_path(AssetKind::Sticker, "../escape.png").empty(),
         "traversal cache file name rejected\n");
+  CHECK(!cache_file_path(AssetKind::Sticker, "a..b.png").empty(),
+        "internal double dots in cache file name allowed\n");
   CHECK(cache_file_path(AssetKind::Sticker, "a/b.png").empty(),
         "slash in cache file name rejected\n");
+  CHECK(cache_file_path(AssetKind::Sticker, "a:b.png").empty(),
+        "alternate-data-stream colon rejected\n");
+  CHECK(cache_file_path(AssetKind::Sticker, "NUL.png").empty(),
+        "reserved Windows device name rejected\n");
 }
 
 // ThemeRegistry::upsert: same id replaces in-place; new id appends.
@@ -744,6 +778,7 @@ static void css_generation_test()
     for ( char c : css ) { if ( c == '{' ) ++braces; else if ( c == '}' ) --braces; }
 
     bool ok = braces == 0
+           && css.find("doki-css-revision: 2") != std::string::npos
            && css.find("@importtheme") != std::string::npos
            && css.find("CustomIDAMemo") != std::string::npos
            && css.find("qproperty-line-bg-default") != std::string::npos
@@ -767,7 +802,16 @@ static void css_generation_test()
 
 bool ida94 = css.find("CustomIDAMemo[debugging=\"true\"]") != std::string::npos
               && css.find("CustomIDAMemo[hints=\"true\"]") != std::string::npos
-              && css.find("CustomIDAMemo[os-dark-theme=\"true\"]") != std::string::npos
+              && css.find("CustomIDAMemo,\nCustomIDAMemo[os-dark-theme=\"true\"]\n{") != std::string::npos
+              && css.find("CustomIDAMemo[os-dark-theme=\"true\"][debugging=\"true\"]") != std::string::npos
+              && css.find("CustomIDAMemo[os-dark-theme=\"true\"][hints=\"true\"]") != std::string::npos
+              && css.find("navband_t,\nnavband_t[os-dark-theme=\"true\"]\n{") != std::string::npos
+              && css.find("text_area_t,\ntext_area_t[os-dark-theme=\"true\"]\n{") != std::string::npos
+              && css.find("TCpuRegs,\nTCpuRegs[os-dark-theme=\"true\"]\n{") != std::string::npos
+              && css.find("syntax_color_t,\nsyntax_color_t[os-dark-theme=\"true\"]\n{") != std::string::npos
+              && css.find("log_widget_t,\nlog_widget_t[os-dark-theme=\"true\"]\n{") != std::string::npos
+              && css.find("xref_tree_t,\nxref_tree_t[os-dark-theme=\"true\"]\n{") != std::string::npos
+              && css.find("QWidget#doki_sticker_overlay") != std::string::npos
               && css.find("qproperty-line-fg-error              : ${doki_error};") != std::string::npos
               && css.find("qproperty-line-pfx-libfunc") != std::string::npos
               && css.find("qproperty-line-bg-highlight-8") != std::string::npos
@@ -775,11 +819,18 @@ bool ida94 = css.find("CustomIDAMemo[debugging=\"true\"]") != std::string::npos
               && css.find("qproperty-graph-edge-no") != std::string::npos
               && css.find("qproperty-hl-lumina-function") != std::string::npos
               && css.find("chooser_widget_t") != std::string::npos
+              && css.find("qproperty-highlight-bg-default") != std::string::npos
+              && css.find("qproperty-cut-text-color-default") != std::string::npos
               && css.find("log_widget_t") != std::string::npos
               && css.find("xref_tree_t") != std::string::npos
               && css.find("JumpAnywhereDialog") != std::string::npos
               && css.find("GraphMiniView") != std::string::npos
-              && css.find("TChooser, diff_fringe_t") != std::string::npos
+              && css.find("qproperty-crosshairs") != std::string::npos
+              && css.find("TChooser\n{") != std::string::npos
+              && css.find("diff_fringe_t\n{") != std::string::npos
+              && css.find("qproperty-highlight-bg-diff-region-pick") != std::string::npos
+              && css.find("qproperty-diff-region-pick") != std::string::npos
+              && css.find("qproperty-keyword1-weight : 1;") != std::string::npos
               && css.find("xg_view_t") != std::string::npos
               && css.find("qproperty-bpt-possible") != std::string::npos
               && css.find("xref_graph_widget_t QWidget") != std::string::npos;
@@ -868,7 +919,8 @@ CHECK(phase28, "Phase 2-8 selectors emitted for %s\n", t.displayName.c_str());
     if ( t.background.valid() )
     {
       bool wall_on_memo = false;
-      auto memo_start = css.find("CustomIDAMemo\n{");
+      auto memo_start = css.find(
+          "CustomIDAMemo,\nCustomIDAMemo[os-dark-theme=\"true\"]\n{");
       auto memo_end   = css.find("\n}\n", memo_start);
       if ( memo_start != std::string::npos && memo_end != std::string::npos )
       {

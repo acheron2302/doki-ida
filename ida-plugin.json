@@ -3,9 +3,17 @@
   "plugin": {
     "name": "Doki Theme",
     "entryPoint": "doki_theme",
-    "categories": ["ui"],
+    "categories": ["ui-ux-and-visualization"],
     "idaVersions": ">=9.0",
+    "platforms": ["windows-x86_64"],
     "description": "Anime character themes (color palettes + stickers/wallpapers) for IDA, ported from doki-theme.",
-    "version": "0.1.0"
+    "version": "0.1.0",
+    "license": "MIT",
+    "authors": [
+      { "name": "KishouYusa", "email": "acheron2302@protonmail.com" }
+    ],
+    "urls": {
+      "repository": "https://github.com/acheron2302/doki-ida"
+    }
   }
 }

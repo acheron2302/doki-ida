@@ -15,7 +15,12 @@ namespace doki
 {
 
 ThemeApplier::ThemeApplier()  = default;
-ThemeApplier::~ThemeApplier() = default;
+ThemeApplier::~ThemeApplier()
+{
+  // Idempotent; also covers the case where plugin construction fails after
+  // the applier installed the nav colorizer or overlay manager.
+  shutdown();
+}
 
 // Sticker anchor policy: pinned to the bottom-right corner regardless of what
 // the theme's JSON says. The upstream Doki definitions still carry
@@ -62,9 +67,49 @@ static uint8_t blend8(uint8_t a, uint8_t b, double t)
   return (uint8_t)(v + 0.5);
 }
 
-uint32_t ThemeApplier::colorize(ea_t ea, asize_t /*nbytes*/)
+uint32_t ThemeApplier::colorize(ea_t ea, asize_t nbytes)
 {
+  // The SDK uses BADADDR + nbytes==navaddr_type_t to ask the colorizer for
+  // the legend color of each address class. Returning a gradient sample in
+  // that case makes every legend swatch wrong (they all come out nav_start).
+  if ( ea == BADADDR )
+  {
+    Rgba c = m_palette.nav_start;
+    switch ( (navaddr_type_t)nbytes )
+    {
+      case nat_lib:  c = m_palette.nav_lib_function;        break;
+      case nat_fun:  c = m_palette.nav_function;            break;
+      case nat_cod:  c = m_palette.nav_code;                break;
+      case nat_dat:  c = m_palette.nav_data;                break;
+      case nat_und:  c = m_palette.nav_undefined;           break;
+      case nat_ext:  c = m_palette.nav_extern;              break;
+      case nat_err:  c = m_palette.nav_error;               break;
+      case nat_gap:  c = m_palette.nav_gap;                 break;
+      case nat_cur:  c = m_palette.nav_cursor;              break;
+      case nat_auto: c = m_palette.nav_auto_analysis_cursor; break;
+      case nat_lum:  c = m_palette.nav_lumina_function;     break;
+      case nat_hlo:  c = m_palette.nav_hl_outline;          break;
+      default:                                              break;
+    }
+    return to_bgr24(c);
+  }
+
   // Linear gradient nav_start -> nav_stop across the database address range.
+  // PLUGIN_MULTI can keep this plugin instance alive while the current idb
+  // changes, and inf_get_max_ea() grows during analysis; both invalidate the
+  // cached range. The API calls are cheap relative to nav-band repainting.
+  const ssize_t dbctx = get_dbctx_id();
+  const ea_t cur_min = inf_get_min_ea();
+  const ea_t cur_max = inf_get_max_ea();
+  if ( dbctx != m_dbctx_id
+    || cur_min != m_min_ea
+    || cur_max != m_max_ea )
+  {
+    m_dbctx_id = dbctx;
+    m_min_ea = cur_min;
+    m_max_ea = cur_max;
+  }
+
   double t = 0.0;
   if ( m_max_ea > m_min_ea && ea >= m_min_ea && ea <= m_max_ea )
     t = double(ea - m_min_ea) / double(m_max_ea - m_min_ea);
@@ -164,6 +209,7 @@ bool ThemeApplier::apply(const DokiThemeDefinition &def, bool activate,
 
   m_palette = map_theme(def);
   m_has_palette = true;
+  m_dbctx_id = get_dbctx_id();
   m_min_ea = inf_get_min_ea();
   m_max_ea = inf_get_max_ea();
 
@@ -209,6 +255,7 @@ void ThemeApplier::apply_live_only(const DokiThemeDefinition &def,
 {
   m_palette = map_theme(def);
   m_has_palette = true;
+  m_dbctx_id = get_dbctx_id();
   m_min_ea = inf_get_min_ea();
   m_max_ea = inf_get_max_ea();
 

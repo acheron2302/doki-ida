@@ -93,6 +93,7 @@ private:
 
   ea_t m_min_ea = 0;
   ea_t m_max_ea = 0;
+  ssize_t m_dbctx_id = -1;   // refresh gradient range when the idb changes
 
   // Lazily created on first apply() in a GUI build; destroyed in shutdown().
   std::unique_ptr<DokiOverlayManager> m_overlay;

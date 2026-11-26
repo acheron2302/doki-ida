@@ -31,13 +31,17 @@ struct theme_chooser_t : public chooser_t
         chooser_item_attrs_t *,
         size_t n) const override
   {
-    out->resize(3);
+    out->resize(4);
     if ( n < reg.size() )
     {
       const DokiThemeDefinition &t = reg.themes()[n];
       (*out)[0] = t.displayName.c_str();
-      (*out)[1] = t.group.c_str();
-      (*out)[2] = t.dark ? "dark" : "light";
+      // Several characters ship multiple variants with the same displayName
+      // (e.g. "Zero Two Dark Obsidian"/"Zero Two Dark Rose"). Show the
+      // unique internal name when it adds information.
+      (*out)[1] = t.name != t.displayName ? t.name.c_str() : "";
+      (*out)[2] = t.group.c_str();
+      (*out)[3] = t.dark ? "dark" : "light";
     }
     *out_icon = -1;
   }
@@ -45,22 +49,26 @@ struct theme_chooser_t : public chooser_t
   // enter() is unused here: we drive the chooser modally via choose() and read
   // the returned index, so selection handling lives in choose_theme().
 
-  static const int s_widths[3];
-  static const char *const s_header[3];
+  static const int s_widths[4];
+  static const char *const s_header[4];
 };
 
-const int theme_chooser_t::s_widths[3] = { 24, 28, 6 };
-const char *const theme_chooser_t::s_header[3] = { "Character", "Series", "Mode" };
+const int theme_chooser_t::s_widths[4] = { 22, 28, 28, 6 };
+const char *const theme_chooser_t::s_header[4] = {
+  "Character", "Variant", "Series", "Mode"
+};
 
-ssize_t choose_theme(const ThemeRegistry &reg)
+ssize_t choose_theme(const ThemeRegistry &reg, ssize_t deflt)
 {
   if ( reg.empty() )
   {
     info("Doki Theme: no character themes are installed.");
     return -1;
   }
-  theme_chooser_t *ch = new theme_chooser_t(reg);
-  ssize_t sel = ch->choose(); // modal; returns index or a negative sentinel
+  theme_chooser_t ch(reg);
+  if ( deflt < 0 || (size_t)deflt >= reg.size() )
+    deflt = 0;
+  ssize_t sel = ch.choose(deflt); // modal; returns index or a negative sentinel
   return sel >= 0 ? sel : -1;
 }
 

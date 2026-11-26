@@ -7,6 +7,7 @@
 //----------------------------------------------------------------------------
 #include "doki/overlay.h"
 
+#include "doki/assets.h"
 #include "doki/log.h"
 #include "doki/paths.h"
 
@@ -106,6 +107,11 @@ DokiStickerOverlayWidget::DokiStickerOverlayWidget(QWidget *parent)
   : QWidget(parent)
 {
   // Transparent overlay: paint only the pixmap alpha, never block input.
+  // The generated theme.css contains a broad `QWidget` background rule; a
+  // widget-local stylesheet (plus the matching objectName rule in the theme)
+  // keeps that rule from painting an opaque rectangle over the listing.
+  setObjectName(QStringLiteral("doki_sticker_overlay"));
+  setStyleSheet(QStringLiteral("background: transparent; border: none;"));
   setAttribute(Qt::WA_TransparentForMouseEvents, true);
   setAttribute(Qt::WA_NoSystemBackground,       true);
   setAttribute(Qt::WA_TranslucentBackground,    true);
@@ -340,17 +346,23 @@ QString DokiOverlayManager::resolve_sticker_path(
     const std::string &installed_theme_name,
     const std::string &sticker_file) const
 {
-  if ( sticker_file.empty() || installed_theme_name.empty() )
+  if ( !is_safe_leaf_name(sticker_file)
+    || !is_safe_leaf_name(installed_theme_name) )
     return QString();
   // Primary: themes/<name>/<sticker>
   const std::string primary = path_join(
       path_join(themes_dir(), installed_theme_name), sticker_file);
-  if ( QFileInfo(QString::fromStdString(primary)).isFile() )
+  if ( is_decodable_png_file(primary) )
     return QString::fromStdString(primary);
-  // Fallback: assets/stickers/<sticker> (compatibility / offline use).
+  // Fallback: the on-demand asset cache. This lets the overlay recover when
+  // the theme folder copy is missing but the sticker was already downloaded.
+  const std::string cached = cache_file_path(AssetKind::Sticker, sticker_file);
+  if ( !cached.empty() && is_decodable_png_file(cached) )
+    return QString::fromStdString(cached);
+  // Fallback: assets/stickers/<sticker> (legacy / bundled use).
   const std::string fallback = path_join(
       path_join(assets_dir(), "stickers"), sticker_file);
-  if ( QFileInfo(QString::fromStdString(fallback)).isFile() )
+  if ( is_decodable_png_file(fallback) )
     return QString::fromStdString(fallback);
   return QString();
 }
@@ -383,7 +395,9 @@ void DokiOverlayManager::update(const std::string &installed_theme_name,
   }
 
   if ( !m_overlay )
-    m_overlay = new DokiStickerOverlayWidget();
+    ensure_widget();
+  if ( !m_overlay )
+    return;
 
   m_overlay->set_sticker(path, sticker_anchor);
   m_current_pixmap_path = path;
@@ -452,6 +466,12 @@ QWidget *DokiOverlayManager::choose_target_widget()
   return nullptr;
 }
 
+void DokiOverlayManager::ensure_widget()
+{
+  if ( !m_overlay )
+    m_overlay = new DokiStickerOverlayWidget();
+}
+
 void DokiOverlayManager::attach_to_current()
 {
   if ( !m_enabled )
@@ -462,6 +482,22 @@ void DokiOverlayManager::attach_to_current()
       m_overlay->clear_target();
     }
     return;
+  }
+
+  // Qt deletes the overlay widget together with its parent when IDA tears
+  // down the view it was attached to. m_enabled and the cached pixmap path
+  // survive that; recreate the widget and restore its content so the next
+  // ui_current_widget_changed notification can reattach it.
+  const bool recreated = m_overlay.isNull();
+  ensure_widget();
+  if ( recreated && m_overlay )
+  {
+    if ( m_current_pixmap_path.isEmpty() )
+    {
+      m_overlay->hide();
+      return;
+    }
+    m_overlay->set_sticker(m_current_pixmap_path, m_current_anchor);
   }
 
   QWidget *target = choose_target_widget();

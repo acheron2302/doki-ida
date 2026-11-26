@@ -13,6 +13,8 @@
 // break the standard headers.
 #include <fstream>
 #include <sstream>
+#include <chrono>
+#include <exception>
 
 #if DOKI_HAS_EMBEDDED_CATALOG
 // Generated at configure time by cmake/embed_file.cmake (driven by the
@@ -22,6 +24,8 @@
 #include "theme_catalog_embed.hpp"
 #endif
 
+#include "doki/assets.h"
+#include "doki/fs.h"
 #include "doki/log.h"
 #include "doki/registry.h"
 #include "doki/theme.h"
@@ -39,6 +43,7 @@
 #include <pro.h>
 #include <diskio.hpp>
 
+#include <algorithm>
 #include <vector>
 
 // Single definition of the verbose-logging flag declared in log.h.
@@ -49,31 +54,42 @@ bool doki::g_verbose = false;
 // diskio include order in this header).
 namespace doki
 {
-  // Marker added to every generated theme.css by the Phase 11 broad-chrome
-  // change. Used by plugin init to detect a stale CSS file (older Doki
-  // build's theme folder is on disk under $IDAUSR/themes/) and trigger
-  // a one-time regeneration in place.
-  static constexpr const char *kCssMigrationMarker = "doki_window_bg";
+  // Marker added to every generated theme.css. Bump this whenever the
+  // generated stylesheet changes in a way existing installations must pick
+  // up (qproperty renames, dark-mode selector fixes, etc.). Plugin init
+  // uses it to detect a stale CSS file and regenerate it in place.
+  static constexpr const char *kCssMigrationMarker = "doki-css-revision: 2";
 
-  // Returns true when the installed theme.css for `def` is missing or
-  // predates the Phase 11 broad-chrome / renamed-qproperty changes (i.e.
-  // lacks the @def doki_window_bg marker). Caller uses this to decide
-  // whether to re-run install_theme() in place.
+  // Returns true when the installed theme.css for `def` is missing, lacks
+  // the current revision marker, or references a wallpaper PNG that is no
+  // longer on disk. Caller uses this to re-run install_theme() in place.
   static bool installed_theme_css_is_stale(const DokiThemeDefinition &def)
   {
     std::string folder = doki::path_join(doki::themes_dir(),
                                          doki::theme_name_for(def));
     std::string css_path = doki::path_join(folder, "theme.css");
-    std::ifstream ifs(css_path, std::ios::binary);
+    std::ifstream ifs(doki::fs_path(css_path), std::ios::binary);
     if ( !ifs )
       return true; // not installed yet -> treat as stale (will install)
     std::stringstream ss;
     ss << ifs.rdbuf();
     const std::string body = ss.str();
-    // Only re-install when the migration marker is missing AND the file
-    // is non-empty. Empty / absent -> stale.
-    return body.empty()
-        || body.find(kCssMigrationMarker) == std::string::npos;
+    if ( body.empty()
+      || body.find(kCssMigrationMarker) == std::string::npos )
+      return true;
+    // A theme.css that still references the wallpaper must have the file
+    // beside it; otherwise IDA paints no wallpaper and no apply may happen.
+    if ( body.find("doki_wallpaper.png") != std::string::npos )
+    {
+      std::error_code ec;
+      const std::string wall = doki::path_join(folder, "doki_wallpaper.png");
+      const std::filesystem::path wp = doki::fs_path(wall);
+      if ( !std::filesystem::is_regular_file(wp, ec)
+        || std::filesystem::file_size(wp, ec) == 0 || ec
+        || !doki::is_decodable_png_file(wall) )
+        return true;
+    }
+    return false;
   }
 }
 
@@ -117,7 +133,7 @@ struct doki_plugin_t : public plugmod_t, public doki::IDokiActions
       // REPLACES the catalog entry in-place; the picker then shows
       // exactly one theme for that id. New ids are appended.
       std::string customDir = doki::definitions_dir();
-      if ( qisdir(customDir.c_str()) )
+      if ( doki::is_dir(customDir) )
       {
         struct collector_t : public file_enumerator_t
         {
@@ -131,6 +147,7 @@ struct doki_plugin_t : public plugmod_t, public doki::IDokiActions
         char answer[QMAXPATH];
         enumerate_files(answer, sizeof(answer), customDir.c_str(),
                         "*.json", collector);
+        std::sort(collector.files.begin(), collector.files.end());
         size_t replaced = 0, added = 0;
         for ( const std::string &p : collector.files )
         {
@@ -154,6 +171,11 @@ struct doki_plugin_t : public plugmod_t, public doki::IDokiActions
     }
     m_cfg = doki::load_config();
 
+    // "Random character" must differ across sessions; a fixed LCG seed would
+    // replay the same sequence after every IDA restart.
+    m_rng = (uint32)std::chrono::system_clock::now()
+                .time_since_epoch().count();
+
     // Capture the user's pre-doki theme once, so "Restore default" is faithful.
     std::string active = doki::current_theme();
     if ( m_cfg.original_theme.empty()
@@ -173,6 +195,20 @@ struct doki_plugin_t : public plugmod_t, public doki::IDokiActions
       const doki::DokiThemeDefinition *t = m_registry.get(m_cfg.selected_id);
       if ( t != nullptr )
       {
+        // Keep the runtime cursors in sync with the persisted selection.
+        // Without this, "Next character" restarts from index 0 after every
+        // IDA restart, and toggles after Restore default have no theme to
+        // fall back to (m_last_applied_id stays empty).
+        m_last_applied_id = t->id;
+        for ( size_t i = 0; i < m_registry.size(); ++i )
+        {
+          if ( m_registry.themes()[i].id == t->id )
+          {
+            m_current = i;
+            break;
+          }
+        }
+
         // One-time CSS migration. If the on-disk theme.css predates the
         // Phase 11 broad-chrome / renamed-qproperty changes, the existing
         // IDA theme folder is stale: it lacks the new @def markers, the
@@ -186,7 +222,8 @@ struct doki_plugin_t : public plugmod_t, public doki::IDokiActions
                         "regenerating in place.\n", t->displayName.c_str());
           doki::install_theme(*t, /*activate=*/false,
                               m_cfg.sticker_enabled,
-                              m_cfg.wallpaper_enabled);
+                              m_cfg.wallpaper_enabled,
+                              /*allow_download=*/false);
         }
 
         // Auto-restore: set up the live nav colorizer and sticker overlay
@@ -215,7 +252,9 @@ struct doki_plugin_t : public plugmod_t, public doki::IDokiActions
   //--- IDokiActions ---------------------------------------------------------
   virtual void open_picker() override
   {
-    ssize_t i = doki::choose_theme(m_registry);
+    const ssize_t deflt = m_current < m_registry.size()
+                        ? (ssize_t)m_current : 0;
+    ssize_t i = doki::choose_theme(m_registry, deflt);
     if ( i >= 0 )
       apply_index((size_t)i);
   }
@@ -232,33 +271,37 @@ struct doki_plugin_t : public plugmod_t, public doki::IDokiActions
   {
     if ( m_registry.empty() )
       return;
-    apply_index((m_current + 1) % m_registry.size());
+    // With no applied theme yet, "next" should start at the first entry,
+    // not skip it because m_current defaults to 0.
+    const size_t next = m_last_applied_id.empty()
+                      ? 0 : (m_current + 1) % m_registry.size();
+    apply_index(next);
   }
 
   virtual void toggle_sticker() override
   {
     m_cfg.sticker_enabled = !m_cfg.sticker_enabled;
     doki::save_config(m_cfg);
-    if ( !reapply_current() )
-    {
-      doki::msg_log("sticker toggle ignored: no Doki theme has been "
-                    "applied yet (open the picker first).\n");
-    }
+    const bool applied = reapply_current();
     doki::sync_action_checked("doki:toggle_sticker", m_cfg.sticker_enabled);
-    doki::msg_log("sticker %s\n", m_cfg.sticker_enabled ? "enabled" : "disabled");
+    if ( applied )
+      doki::msg_log("sticker %s\n", m_cfg.sticker_enabled ? "enabled" : "disabled");
+    else
+      doki::msg_log("sticker preference saved; it will take effect once a "
+                    "Doki theme is applied.\n");
   }
 
   virtual void toggle_wallpaper() override
   {
     m_cfg.wallpaper_enabled = !m_cfg.wallpaper_enabled;
     doki::save_config(m_cfg);
-    if ( !reapply_current() )
-    {
-      doki::msg_log("wallpaper toggle ignored: no Doki theme has been "
-                    "applied yet (open the picker first).\n");
-    }
+    const bool applied = reapply_current();
     doki::sync_action_checked("doki:toggle_wallpaper", m_cfg.wallpaper_enabled);
-    doki::msg_log("wallpaper %s\n", m_cfg.wallpaper_enabled ? "enabled" : "disabled");
+    if ( applied )
+      doki::msg_log("wallpaper %s\n", m_cfg.wallpaper_enabled ? "enabled" : "disabled");
+    else
+      doki::msg_log("wallpaper preference saved; it will take effect once a "
+                    "Doki theme is applied.\n");
   }
 
   virtual void toggle_live_nav_colorizer() override
@@ -274,8 +317,6 @@ struct doki_plugin_t : public plugmod_t, public doki::IDokiActions
     // (m_has_palette guard inside update_colorizer_state).
     const doki::DokiThemeDefinition *t =
         m_registry.get(m_cfg.selected_id);
-    if ( t == nullptr && !m_last_applied_id.empty() )
-      t = m_registry.get(m_last_applied_id);
     if ( t != nullptr )
       m_applier.set_live_nav_colorizer_enabled(m_cfg.live_nav_colorizer_enabled);
     else
@@ -321,13 +362,17 @@ private:
   {
     if ( i >= m_registry.size() )
       return;
-    m_current = i;
     const doki::DokiThemeDefinition &t = m_registry.themes()[i];
-    m_applier.apply(t,
-                    /*activate=*/true,
-                    m_cfg.sticker_enabled,
-                    m_cfg.wallpaper_enabled,
-                    m_cfg.live_nav_colorizer_enabled);
+    if ( !m_applier.apply(t,
+                          /*activate=*/true,
+                          m_cfg.sticker_enabled,
+                          m_cfg.wallpaper_enabled,
+                          m_cfg.live_nav_colorizer_enabled) )
+    {
+      doki::msg_log("  apply failed; keeping previous selection.\n");
+      return;
+    }
+    m_current = i;
     m_cfg.selected_id = t.id;
     m_last_applied_id = t.id;
     doki::save_config(m_cfg);
@@ -356,12 +401,16 @@ private:
       return false;
     }
     // Toggles do not change the active IDA theme; they only re-install the
-    // assets and refresh the live nav colorizer.
-    m_applier.apply(*t,
-                    /*activate=*/false,
-                    m_cfg.sticker_enabled,
-                    m_cfg.wallpaper_enabled,
-                    m_cfg.live_nav_colorizer_enabled);
+    // assets and refresh the live nav colorizer. If the selected theme was
+    // cleared by Restore default, keep the runtime colorizer off even when
+    // the persisted preference is enabled.
+    const bool selected_active = m_registry.get(m_cfg.selected_id) != nullptr;
+    if ( !m_applier.apply(*t,
+                          /*activate=*/false,
+                          m_cfg.sticker_enabled,
+                          m_cfg.wallpaper_enabled,
+                          m_cfg.live_nav_colorizer_enabled && selected_active) )
+      return false;
     m_last_applied_id = t->id;
     return true;
   }
@@ -388,7 +437,21 @@ private:
 //----------------------------------------------------------------------------
 static plugmod_t *idaapi init()
 {
-  return new doki_plugin_t;
+  try
+  {
+    return new doki_plugin_t;
+  }
+  catch ( const std::exception &e )
+  {
+    doki::unregister_actions();
+    doki::msg_log("initialization failed: %s\n", e.what());
+  }
+  catch ( ... )
+  {
+    doki::unregister_actions();
+    doki::msg_log("initialization failed: unknown exception\n");
+  }
+  return nullptr;
 }
 
 //----------------------------------------------------------------------------

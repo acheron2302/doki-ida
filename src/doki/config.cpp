@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 #include <fstream>
 
+#include "doki/fs.h"
 #include "doki/config.h"
 #include "doki/paths.h"
 #include "doki/log.h"
@@ -23,7 +24,7 @@ static std::string config_path()
 DokiConfig load_config()
 {
   DokiConfig cfg;
-  std::ifstream ifs(config_path(), std::ios::binary);
+  std::ifstream ifs(doki::fs_path(config_path()), std::ios::binary);
   if ( !ifs )
     return cfg;
 
@@ -61,11 +62,14 @@ bool save_config(const DokiConfig &cfg)
   j["originalTheme"]           = cfg.original_theme;
   j["liveNavColorizerEnabled"] = cfg.live_nav_colorizer_enabled;
 
-  std::ofstream ofs(config_path(), std::ios::binary | std::ios::trunc);
+  std::ofstream ofs(doki::fs_path(config_path()),
+                    std::ios::binary | std::ios::trunc);
   if ( !ofs )
     return false;
-  const std::string s = j.dump(2);
+  const std::string s =
+      j.dump(2, ' ', false, nlohmann::json::error_handler_t::replace);
   ofs.write(s.data(), (std::streamsize)s.size());
+  ofs.flush();
   return (bool)ofs;
 }
 

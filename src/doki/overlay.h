@@ -103,6 +103,10 @@ private:
   // Hook the active viewer/widget and place the overlay on it.
   void attach_to_current();
 
+  // Recreate the overlay widget after Qt destroyed it with a former parent
+  // (e.g. when IDA replaced the active view underneath us).
+  void ensure_widget();
+
   // Disable overlay state until the next successful update(). Clears the
   // pixmap and target event filter so window events cannot resurrect it.
   void disable_overlay();

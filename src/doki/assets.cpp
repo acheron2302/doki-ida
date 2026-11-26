@@ -194,6 +194,9 @@ struct CurlApi
                         : dir + QStringLiteral("/") + qname);
         if ( lib.load() )
           break;
+        // Clear a failed load before trying the next candidate; some Qt
+        // versions remember the error state across setFileName() calls.
+        lib.unload();
       }
       if ( lib.isLoaded() )
         break;
@@ -338,8 +341,8 @@ bool download_asset_body(const std::string &url,
                static_cast<long>(kRequestTimeoutMs))
     || !setopt(CURLOPT_SSL_VERIFYPEER, 1L)
     || !setopt(CURLOPT_SSL_VERIFYHOST, 2L)
-    || !setopt(CURLOPT_PROTOCOLS, CURLPROTO_HTTPS)
-    || !setopt(CURLOPT_REDIR_PROTOCOLS, CURLPROTO_HTTPS) )
+    || !setopt(CURLOPT_PROTOCOLS, static_cast<long>(CURLPROTO_HTTPS))
+    || !setopt(CURLOPT_REDIR_PROTOCOLS, static_cast<long>(CURLPROTO_HTTPS)) )
   {
     doki::msg_log("  assets: curl_easy_setopt failed for %s file '%s' "
                   "url '%s' (code=%d %s)\n",
@@ -510,9 +513,7 @@ bool is_valid_remote_path(AssetKind kind, const std::string &remote_path)
   // Disallow backslashes; the CDN serves forward-slash paths.
   if ( remote_path.find('\\') != std::string::npos )
     return false;
-  // Reject traversal segments and protocol markers.
-  if ( remote_path.find("..") != std::string::npos )
-    return false;
+  // Reject protocol markers.
   if ( remote_path.find("://") != std::string::npos )
     return false;
   // Must start with the expected category prefix and have at least one more
@@ -525,11 +526,21 @@ bool is_valid_remote_path(AssetKind kind, const std::string &remote_path)
   const std::string tail = remote_path.substr(prefix.size());
   if ( tail.empty() || tail.back() == '/' )
     return false;
-  // Reject any empty path segment (which would indicate "a//b").
-  for ( size_t i = 0; i < tail.size(); ++i )
+  // Reject empty path segments (including a leading slash, i.e. "a//b" or
+  // "stickers//x.png"), which would produce a malformed CDN URL.
+  size_t seg_start = 0;
+  while ( seg_start <= tail.size() )
   {
-    if ( tail[i] == '/' && (i + 1 < tail.size()) && tail[i + 1] == '/' )
+    const size_t slash = tail.find('/', seg_start);
+    const size_t seg_end = slash == std::string::npos ? tail.size() : slash;
+    if ( seg_end == seg_start )
       return false;
+    const std::string seg = tail.substr(seg_start, seg_end - seg_start);
+    if ( seg == "." || seg == ".." )
+      return false;
+    if ( slash == std::string::npos )
+      break;
+    seg_start = slash + 1;
   }
   return true;
 }
@@ -551,14 +562,19 @@ std::string cache_file_path(AssetKind kind, const std::string &file_name)
 {
   // Defensive: the file name is treated as a leaf only. Reject anything
   // that would escape the cache directory.
-  if ( file_name.empty()
-    || file_name.find('/')  != std::string::npos
-    || file_name.find('\\') != std::string::npos
-    || file_name.find("..") != std::string::npos )
-  {
+  if ( !is_safe_leaf_name(file_name) )
     return std::string();
-  }
   return path_join(cache_dir(kind), file_name);
+}
+
+bool is_decodable_png_file(const std::string &path)
+{
+  QImageReader r(QString::fromStdString(path));
+  r.setFormat("png");
+  if ( !r.canRead() )
+    return false;
+  QImage img = r.read();
+  return !img.isNull();
 }
 
 // ---------------------------------------------------------------------------
@@ -570,12 +586,7 @@ namespace
 
 bool is_decodable_png(const QString &path)
 {
-  QImageReader r(path);
-  r.setFormat("png");
-  if ( !r.canRead() )
-    return false;
-  QImage img = r.read();
-  return !img.isNull();
+  return is_decodable_png_file(path.toStdString());
 }
 
 QString unique_temp_path(const std::string &final_path)
@@ -626,9 +637,17 @@ std::string ensure_asset(AssetKind kind,
     return std::string();
   }
 
-  // 2) Cache hit?
-  if ( QFileInfo(QString::fromStdString(final_path)).isFile() )
-    return final_path;
+  // 2) Cache hit? Trust only a fully decodable PNG; a zero-byte, truncated,
+  //    or corrupted file must be refetched.
+  const QString cached_qpath = QString::fromStdString(final_path);
+  if ( QFileInfo(cached_qpath).isFile() )
+  {
+    if ( is_decodable_png(cached_qpath) )
+      return final_path;
+    doki::msg_log("  assets: cached %s/%s is not a valid PNG; refetching\n",
+                  kind_prefix(kind), file_name.c_str());
+    QFile::remove(cached_qpath);
+  }
 
   // 3) Coalesce concurrent fetches for the same key.
   const std::string key = inflight_key(kind, file_name);

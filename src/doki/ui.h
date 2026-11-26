@@ -44,7 +44,7 @@ void unregister_actions();
 void sync_action_checked(const char *name, bool checked);
 
 // Show the modal character chooser. Returns the chosen theme index in 'reg',
-// or -1 if cancelled.
-ssize_t choose_theme(const ThemeRegistry &reg);
+// or -1 if cancelled. 'deflt' is the initially highlighted row.
+ssize_t choose_theme(const ThemeRegistry &reg, ssize_t deflt = 0);
 
 } // namespace doki

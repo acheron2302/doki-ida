@@ -108,6 +108,7 @@ foreach ($f in $files) {
     $id    = [string]$j.id
     $name  = [string]$j.name
     $disp  = if ($j.PSObject.Properties.Match('displayName').Count) { [string]$j.displayName } else { $name }
+    if ([string]::IsNullOrEmpty($disp)) { $disp = $name }
     $group = if ($j.PSObject.Properties.Match('group').Count) { [string]$j.group } else { "" }
     $auth  = if ($j.PSObject.Properties.Match('author').Count) { [string]$j.author } else { "" }
     $dark  = if ($j.PSObject.Properties.Match('dark').Count) { [bool]$j.dark } else { $true }
@@ -247,7 +248,7 @@ foreach ($f in $files) {
 }
 
 # Sort deterministically.
-$sorted = ($entries | Sort-Object -Property `
+$sorted = @($entries | Sort-Object -Property `
     @{Expression={$_.group}; Ascending=$true},
     @{Expression={$_.displayName}; Ascending=$true},
     @{Expression={$_.name}; Ascending=$true},

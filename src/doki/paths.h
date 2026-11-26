@@ -31,6 +31,14 @@ std::string themes_dir();
 // Join two path components with the platform separator.
 std::string path_join(const std::string &a, const std::string &b);
 
+// True for a single, non-traversing file name (no separators, no "..").
+// Used before suffixing definition-supplied asset names to a directory.
+bool is_safe_leaf_name(const std::string &name);
+
+// Directory existence check using the same UTF-8/ANSI path conversion as
+// ensure_dir(). Do not use qisdir() for runtime paths on Windows.
+bool is_dir(const std::string &dir);
+
 // Create a directory (and parents). Returns true on success or if it exists.
 bool ensure_dir(const std::string &dir);
 

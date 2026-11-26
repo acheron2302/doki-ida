@@ -31,10 +31,13 @@ std::string theme_name_for(const DokiThemeDefinition &def);
 // 'with_sticker'  controls whether the character sticker is emitted/copied.
 // 'with_wallpaper' controls whether a full-listing wallpaper is used (only if
 //                  a matching wallpaper asset exists for this theme).
+// 'allow_download' when false only uses already cached/installed assets
+//                  (plugin-init migration must not block on the network).
 InstallResult install_theme(const DokiThemeDefinition &def,
                             bool activate = true,
                             bool with_sticker = true,
-                            bool with_wallpaper = true);
+                            bool with_wallpaper = true,
+                            bool allow_download = true);
 
 // Set the active IDA theme by folder name (registry ThemeName).
 void activate_theme(const std::string &theme_name);

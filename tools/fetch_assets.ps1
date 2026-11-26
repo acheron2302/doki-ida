@@ -42,7 +42,7 @@ if (-not $CatalogPath) {
     $CatalogPath = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
 }
 if (-not $CatalogPath -or -not (Test-Path $CatalogPath)) {
-    throw "no theme_catalog.json found; run tools\generate_theme_catalog.ps1 or deploy first"
+    throw "no theme_catalog.json found; run tools\generate_theme_catalog.ps1 first"
 }
 
 $stickersDir = Join-Path $OutDir "cache\stickers"
@@ -66,7 +66,7 @@ function Test-Filter {
     }
     if ($NameLike) {
         $matched = $false
-        foreach ($field in "name","displayName","id") {
+        foreach ($field in "name","displayName","group","id") {
             $v = [string]$t.$field
             if ($v -like "*$NameLike*") { $matched = $true; break }
         }

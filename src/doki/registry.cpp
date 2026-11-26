@@ -9,6 +9,7 @@
 // declarations are parsed against an unpolluted std namespace.
 #include <nlohmann/json.hpp>
 
+#include "doki/fs.h"
 #include "doki/registry.h"
 #include "doki/paths.h"
 #include "doki/log.h"
@@ -49,7 +50,7 @@ size_t ThemeRegistry::load_dir(const std::string &dir)
   // externally.
   m_themes.clear();
 
-  if ( dir.empty() || !qisdir(dir.c_str()) )
+  if ( dir.empty() || !doki::is_dir(dir) )
   {
     doki::msg_log("definitions dir not found: %s\n", dir.c_str());
     return 0;
@@ -91,6 +92,9 @@ size_t ThemeRegistry::load_catalog_from_memory(const char *json_data,
 {
   m_themes.clear();
 
+  if ( source_name == nullptr )
+    source_name = "(catalog)";
+
   if ( json_data == nullptr || json_len == 0 )
   {
     doki::msg_log("catalog: in-memory data is empty (%s)\n", source_name);
@@ -114,8 +118,26 @@ size_t ThemeRegistry::load_catalog_from_memory(const char *json_data,
     return 0;
   }
 
-  // Schema check. We only support schemaVersion 1.
-  int schema = j.value("source", nlohmann::json::object()).value("schemaVersion", 0);
+  // Schema check. We only support schemaVersion 1. Every lookup here is
+  // type-guarded: a hand-edited/corrupt catalog must be rejected with a log,
+  // not throw a nlohmann type_error out of plugin init().
+  int schema = 0;
+  const auto source_it = j.find("source");
+  if ( source_it != j.end() && source_it->is_object() )
+  {
+    const auto version_it = source_it->find("schemaVersion");
+    if ( version_it != source_it->end() && version_it->is_number_integer() )
+    {
+      try
+      {
+        schema = version_it->get<int>();
+      }
+      catch ( const std::exception & )
+      {
+        schema = 0;
+      }
+    }
+  }
   if ( schema != 1 )
   {
     doki::msg_log("catalog: unsupported schemaVersion %d (expected 1) in %s\n",
@@ -123,12 +145,13 @@ size_t ThemeRegistry::load_catalog_from_memory(const char *json_data,
     return 0;
   }
 
-  const nlohmann::json &themes = j["themes"];
-  if ( !themes.is_array() )
+  const auto themes_it = j.find("themes");
+  if ( themes_it == j.end() || !themes_it->is_array() )
   {
     doki::msg_log("catalog: 'themes' is not an array (%s)\n", source_name);
     return 0;
   }
+  const nlohmann::json &themes = *themes_it;
 
   // Themes array is already sorted by the generator; we re-sort here
   // defensively so the registry is correct even if the file is hand-
@@ -141,7 +164,8 @@ size_t ThemeRegistry::load_catalog_from_memory(const char *json_data,
   {
     DokiThemeDefinition def;
     std::string err;
-    const std::string entry_text = t.dump();
+    const std::string entry_text = t.dump(
+        -1, ' ', false, nlohmann::json::error_handler_t::replace);
     if ( load_definition_from_json_string(entry_text, &def, &err) )
     {
       parsed.push_back(std::move(def));
@@ -176,7 +200,7 @@ size_t ThemeRegistry::load_catalog_from_memory(const char *json_data,
 // ----- load_catalog ---------------------------------------------------------
 size_t ThemeRegistry::load_catalog(const std::string &path)
 {
-  std::ifstream ifs(path, std::ios::binary);
+  std::ifstream ifs(doki::fs_path(path), std::ios::binary);
   if ( !ifs )
   {
     doki::msg_log("catalog not found: %s\n", path.c_str());
@@ -205,7 +229,26 @@ bool ThemeRegistry::upsert(const DokiThemeDefinition &t)
   {
     if ( existing.id == t.id )
     {
-      existing = t;
+      // A custom definition that only tweaks colors may omit the stickers /
+      // background blocks entirely, or repeat the catalog names while
+      // omitting remotePath. Preserve the catalog artwork in both cases.
+      DokiThemeDefinition merged = t;
+      if ( !merged.sticker.valid() )
+        merged.sticker = existing.sticker;
+      else if ( merged.sticker.remote_path.empty()
+        && merged.sticker.name == existing.sticker.name )
+        merged.sticker.remote_path = existing.sticker.remote_path;
+      if ( !merged.secondary.valid() )
+        merged.secondary = existing.secondary;
+      else if ( merged.secondary.remote_path.empty()
+        && merged.secondary.name == existing.secondary.name )
+        merged.secondary.remote_path = existing.secondary.remote_path;
+      if ( !merged.background.valid() )
+        merged.background = existing.background;
+      else if ( merged.background.remote_path.empty()
+        && merged.background.name == existing.background.name )
+        merged.background.remote_path = existing.background.remote_path;
+      existing = std::move(merged);
       return true;
     }
   }

@@ -16,6 +16,31 @@ endif()
 include($ENV{IDASDK}/ida-cmake/bootstrap.cmake)
 find_package(idasdk REQUIRED)
 
+# ida-cmake derives the Windows library folder as
+# lib/x64_win_vc_64, while some IDA SDK distributions ship the same import
+# libraries under lib/x64_win_64. Point the imported target at the existing
+# folder instead of failing with LNK1181.
+if(WIN32 AND MSVC)
+    set(_doki_ida_lib_vc "$ENV{IDASDK}/lib/x64_win_vc_64/ida.lib")
+    set(_doki_ida_lib_alt "$ENV{IDASDK}/lib/x64_win_64/ida.lib")
+    if(NOT EXISTS "${_doki_ida_lib_vc}" AND EXISTS "${_doki_ida_lib_alt}")
+        get_target_property(_doki_ida_libs idasdk::plugin INTERFACE_LINK_LIBRARIES)
+        if(_doki_ida_libs)
+            set(_doki_ida_libs_fixed "")
+            foreach(_lib IN LISTS _doki_ida_libs)
+                if(_lib MATCHES "x64_win_vc_64" AND _lib MATCHES "ida\\.lib$")
+                    list(APPEND _doki_ida_libs_fixed "${_doki_ida_lib_alt}")
+                else()
+                    list(APPEND _doki_ida_libs_fixed "${_lib}")
+                endif()
+            endforeach()
+            set_property(TARGET idasdk::plugin PROPERTY
+                         INTERFACE_LINK_LIBRARIES "${_doki_ida_libs_fixed}")
+            message(STATUS "Using IDA SDK library: ${_doki_ida_lib_alt}")
+        endif()
+    endif()
+endif()
+
 set(DOKI_VERSION "0.1.0")
 
 # ---------------------------------------------------------------------------
@@ -101,7 +126,6 @@ endif()
 #     still ship a libcurl runtime DLL if they prefer.
 # ---------------------------------------------------------------------------
 option(DOKI_USE_EMBEDDED_CURL "Statically link libcurl into the plugin" ON)
-set(DOKI_HAS_EMBEDDED_CURL 0)
 if(DOKI_USE_EMBEDDED_CURL)
     include(FetchContent)
     set(FETCHCONTENT_QUIET FALSE)
@@ -151,18 +175,16 @@ if(DOKI_USE_EMBEDDED_CURL)
 
     FetchContent_MakeAvailable(doki_libcurl)
 
-    # libcurl is a C project; force-disable its PIC requirement so it can
-    # link cleanly into our IDA plugin DLL on MSVC (no PIC on x64).
-    set_target_properties(libcurl_static PROPERTIES POSITION_INDEPENDENT_CODE OFF)
-
-    set(DOKI_HAS_EMBEDDED_CURL 1)
-endif()
-
-# Ensure src/doki/assets.cpp sees DOKI_HAS_EMBEDDED_CURL as 0/1, not a
-# generator expression that has not been resolved at the TU level.
-set(DOKI_HAS_EMBEDDED_CURL_INT 0)
-if(DOKI_USE_EMBEDDED_CURL)
-    set(DOKI_HAS_EMBEDDED_CURL_INT 1)
+    # libcurl is a C project. On MSVC PIC is irrelevant, so disable it to
+    # keep the static archive simple. On ELF/Mach-O the static libcurl is
+    # linked into a shared plugin, so it must be position independent.
+    if(WIN32)
+        set_target_properties(libcurl_static PROPERTIES
+                              POSITION_INDEPENDENT_CODE OFF)
+    else()
+        set_target_properties(libcurl_static PROPERTIES
+                              POSITION_INDEPENDENT_CODE ON)
+    endif()
 endif()
 
 ida_add_plugin(doki_theme
@@ -255,6 +277,12 @@ target_compile_definitions(doki_theme PRIVATE
     DOKI_VERSION="${DOKI_VERSION}"
     DOKI_HAS_EMBEDDED_CATALOG=${DOKI_HAS_EMBEDDED_CATALOG}
 )
+
+# nlohmann/json plus the embedded catalog generate a lot of template/initializer
+# code; /bigobj keeps MSVC from exhausting the default object-file section limit.
+if(MSVC)
+    target_compile_options(doki_theme PRIVATE /bigobj /utf-8)
+endif()
 
 # Regenerate the theme catalog from the snapshotted upstream
 # definitions. This is a manual step by design: it requires network

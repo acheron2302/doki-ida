@@ -118,7 +118,7 @@ All actions live under the **Options** menu:
 Prerequisites: IDA SDK 9.2+ (`IDASDK` env var), CMake 3.27+, Visual Studio 2022
 (MSVC), the bundled [`ida-cmake`](https://github.com/allthingsida/ida-cmake)
 (ships inside the official HexRaysSA/ida-sdk under `$IDASDK/ida-cmake`).
-The plugin also links against `Qt6::Network` (the developer's Qt6 install,
+The plugin also requires Qt6 Core/Gui/Widgets (the developer's Qt6 install,
 pointed to via `DOKI_QT_DIR` or `CMAKE_PREFIX_PATH`).
 
 ```powershell
@@ -131,7 +131,7 @@ tools\generate_theme_catalog.ps1
 # 2) Build the plugin.
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config Release
-# 3) Deploy for local testing (DLL -> IDADIR\plugins, catalog -> $IDAUSR\doki-theme).
+# 3) Deploy for local testing (DLL -> IDADIR\plugins; catalog is embedded).
 tools\deploy.ps1
 # 4) Build a distributable zip in dist\.
 cmake --build build --target package        # or: tools\package.ps1
@@ -175,8 +175,9 @@ shipped via the generated `theme_catalog.json`. To bring in more:
 
 ## Cross-platform notes
 The engine is plain C++ + IDA SDK (no Qt linkage in tty mode), so it ports
-cleanly. Qt and `Qt6::Network` are used by the sticker overlay and the asset
-manager; the rest is portable.
+cleanly. Qt Core/Gui/Widgets are used by the sticker overlay; the asset
+manager uses libcurl (statically linked by default), so Qt SSL support is
+not required. The rest is portable.
 - **Output name:** `doki_theme.dll` (Windows) / `.so` (Linux) / `.dylib` (macOS)
   — handled by `ida_add_plugin`.
 - **`$IDAUSR` default:** `%APPDATA%\Hex-Rays\IDA Pro` (Windows),

@@ -21,6 +21,7 @@
 //----------------------------------------------------------------------------
 #include <nlohmann/json.hpp>
 
+#include "doki/fs.h"
 #include "doki/theme.h"
 
 #include <fstream>
@@ -125,7 +126,11 @@ static bool load_definition_from_json_internal(const nlohmann::json &j,
   {
     def.id          = j.value("id", std::string());
     def.name        = j.value("name", std::string());
+    if ( def.name.empty() )
+      def.name = def.id;
     def.displayName = j.value("displayName", def.name);
+    if ( def.displayName.empty() )
+      def.displayName = def.name;
     def.group       = j.value("group", std::string());
     def.author      = j.value("author", std::string());
     def.product     = j.value("product", std::string("community"));
@@ -147,15 +152,17 @@ static bool load_definition_from_json_internal(const nlohmann::json &j,
     if ( j.contains("colors") )
       merge_colors(&def.colors, j["colors"]);
 
-    // Capture the base accentColor BEFORE the editor-scheme override merge
-    // overwrites it. The chrome (Qt / window chrome) surface uses the base
-    // accent, while the listing/decompiler surface uses the override. After
-    // the merge, def.colors["accentColor"] is the overridden value, so this
-    // pre-merge snapshot is the only way to recover the chrome accent.
-    auto base_acc = def.colors.find("accentColor");
-    if ( base_acc != def.colors.end() )
+    // Capture the base accent BEFORE the editor-scheme override merge
+    // overwrites it. Resolve intra-palette references on a copy first so a
+    // definition that writes accentColor as a key reference still yields a
+    // real color here (rather than the reference name).
+    std::map<std::string, std::string> base_colors = def.colors;
+    resolve_references(&base_colors);
+    auto base_acc = base_colors.find("accentColor");
+    if ( base_acc != base_colors.end() )
       def.chrome_accent_color = base_acc->second;
 
+    std::string editor_accent_raw;
     if ( j.contains("overrides")
       && j["overrides"].is_object()
       && j["overrides"].contains("editorScheme")
@@ -163,20 +170,30 @@ static bool load_definition_from_json_internal(const nlohmann::json &j,
       && j["overrides"]["editorScheme"].contains("colors") )
     {
       const nlohmann::json &ec = j["overrides"]["editorScheme"]["colors"];
-      // Capture the editor-scheme accent BEFORE the merge so callers can
-      // distinguish "editor accent" from "chrome accent". After the merge,
-      // def.colors["accentColor"] is the overridden (mint) value, so the
-      // pre-merge value would otherwise be lost.
+      // Remember the editor-scheme accent before the merge; resolve it
+      // after the merge so references to any merged key work too.
       if ( ec.is_object() && ec.contains("accentColor")
         && ec["accentColor"].is_string() )
       {
-        def.editor_accent_color = normalize_color(
+        editor_accent_raw = normalize_color(
             ec["accentColor"].get<std::string>());
       }
       merge_colors(&def.colors, ec);
     }
 
     resolve_references(&def.colors);
+
+    if ( !editor_accent_raw.empty() )
+    {
+      if ( editor_accent_raw[0] == '#' )
+        def.editor_accent_color = editor_accent_raw;
+      else
+      {
+        auto it = def.colors.find(editor_accent_raw);
+        def.editor_accent_color = it != def.colors.end()
+                                ? it->second : editor_accent_raw;
+      }
+    }
   }
   catch ( const std::exception &e )
   {
@@ -201,6 +218,12 @@ bool load_definition_from_json_string(const std::string &json_text,
                                       DokiThemeDefinition *out,
                                       std::string *err)
 {
+  if ( out == nullptr )
+  {
+    if ( err != nullptr )
+      *err = "null output definition";
+    return false;
+  }
   nlohmann::json j;
   try
   {
@@ -220,7 +243,19 @@ bool load_definition(const char *path,
                      DokiThemeDefinition *out,
                      std::string *err)
 {
-  std::ifstream ifs(path, std::ios::binary);
+  if ( path == nullptr )
+  {
+    if ( err != nullptr )
+      *err = "null path";
+    return false;
+  }
+  if ( out == nullptr )
+  {
+    if ( err != nullptr )
+      *err = "null output definition";
+    return false;
+  }
+  std::ifstream ifs(doki::fs_path(path), std::ios::binary);
   if ( !ifs )
   {
     if ( err != nullptr )

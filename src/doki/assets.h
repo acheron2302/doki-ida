@@ -9,11 +9,10 @@
 //
 // The manager is best-effort by design: failures (network, HTTP, decode)
 // log a warning and return an empty path so the caller's artwork install
-// degrades gracefully (colors / nav styling still apply). It is also
-// thread-aware enough to guard against re-entrant fetches within a single
-// apply pass via a static in-flight set; the Qt request itself runs on
-// the calling thread with a short bounded timeout so Qt events keep
-// processing.
+// degrades gracefully (colors / nav styling still apply). A static
+// in-flight set coalesces re-entrant fetches within one process. The
+// request itself is a blocking libcurl call on the calling thread with
+// strict connect/total timeouts.
 //----------------------------------------------------------------------------
 #pragma once
 
@@ -49,6 +48,10 @@ bool is_valid_remote_path(AssetKind kind, const std::string &remote_path);
 // are hard-coded. Asserts (well, returns empty) for invalid input.
 std::string cdn_url_for(AssetKind kind, const std::string &remote_path);
 
+// Fully decode a local PNG. Used by the installer, overlay, and init-time
+// migration so a file with a valid header but corrupt body is not trusted.
+bool is_decodable_png_file(const std::string &path);
+
 // Local cache directory for a given category
 //   $IDAUSR/doki-theme/cache/stickers
 //   $IDAUSR/doki-theme/cache/wallpapers
@@ -66,8 +69,9 @@ std::string cache_file_path(AssetKind kind, const std::string &file_name);
 //      remove any temp file, and return an empty string.
 //
 // The function is safe to call from the main thread while IDA is running:
-// it uses Qt's nested event loop with a strict timeout. Multiple concurrent
-// callers for the same (kind, file_name) are coalesced.
+// it performs a blocking libcurl request with strict connect/total
+// timeouts. Multiple concurrent callers for the same (kind, file_name)
+// are coalesced.
 std::string ensure_asset(AssetKind kind,
                          const std::string &file_name,
                          const std::string &remote_path);

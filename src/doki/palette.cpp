@@ -102,14 +102,15 @@ IdaPalette map_theme(const DokiThemeDefinition &def)
   p.chrome_contrast     = pick(def, {"contrastColor", "codeBlock"}, p.secondary_bg);
   p.chrome_completion_bg= pick(def, {"completionWindowBackground", "codeBlock"}, p.secondary_bg);
   p.chrome_popup_mask   = pick(def, {"popupMask"}, p.window_bg);
-  p.accent_contrast     = pick(def, {"accentContrastColor"}, p.text);
+  p.accent_contrast     = readable(pick(def, {"accentContrastColor"}, p.text),
+                                    p.editor_accent, def.dark, 4.0);
 
   // --- Accent transparency utilities (Phase 10) ---
   // The transparent accent variants are intended for editor/listing hover
   // and halo overlays, so fall back to editor_accent rather than ui_accent.
-  p.accent_a35 = pick(def, {"accentColorTransparent"},      p.editor_accent);
-  p.accent_a60 = pick(def, {"accentColorLessTransparent"},  p.editor_accent);
-  p.accent_a16 = pick(def, {"accentColorMoreTransparent"},  p.editor_accent);
+  p.accent_a35 = pick(def, {"accentColorTransparent"},     with_alpha(p.editor_accent, 0x5A));
+  p.accent_a60 = pick(def, {"accentColorLessTransparent"}, with_alpha(p.editor_accent, 0x9A));
+  p.accent_a16 = pick(def, {"accentColorMoreTransparent"}, with_alpha(p.editor_accent, 0x2A));
 
   // --- listing / syntax ---
   p.lst_bg       = p.base_bg;
@@ -148,7 +149,6 @@ IdaPalette map_theme(const DokiThemeDefinition &def)
   p.pfx_extern = p.lst_register; p.pfx_unexplored = p.lst_unused; p.pfx_libfunc = p.lst_info;
   p.pfx_hidden = p.lst_comment; p.pfx_lumina = p.success;
   p.pfx_current_line = with_alpha(p.editor_accent, 120);
-  p.pfx_current_item = p.caret_row;
 
   // --- Selection / search / breakpoints (Phase 3) ---
   p.search_bg       = pick(def, {"searchBackground"}, p.editor_accent);
